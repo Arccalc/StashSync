@@ -1,0 +1,132 @@
+use std::fs;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use winreg::enums::HKEY_CURRENT_USER;
+use winreg::RegKey;
+
+/// 30 seconds minimum (manual testing / impatient users).
+const MIN_POLL_SECS: u64 = 30;
+/// 30 minutes max.
+const MAX_POLL_SECS: u64 = 30 * 60;
+/// Default: 3 minutes.
+const DEFAULT_POLL_SECS: u64 = 3 * 60;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HelperConfig {
+    /// How often to re-query Embark inventory (seconds).
+    pub poll_interval_secs: u64,
+    /// Auto-start Steam prep when the app opens.
+    pub auto_prepare_steam: bool,
+    /// When false, only Sync now talks to the game. The interval does nothing.
+    pub auto_sync: bool,
+    /// Current-user Run key. Off removes the value.
+    pub run_at_startup: bool,
+    /// en, ru, de, or fr. Empty or unknown means English.
+    pub language: String,
+}
+
+impl Default for HelperConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_secs: DEFAULT_POLL_SECS,
+            auto_prepare_steam: false,
+            auto_sync: true,
+            run_at_startup: false,
+            language: String::new(),
+        }
+    }
+}
+
+impl HelperConfig {
+    pub fn clamp(mut self) -> Self {
+        self.poll_interval_secs = self.poll_interval_secs.clamp(MIN_POLL_SECS, MAX_POLL_SECS);
+        self
+    }
+
+    pub fn min_poll() -> u64 {
+        MIN_POLL_SECS
+    }
+
+    pub fn max_poll() -> u64 {
+        MAX_POLL_SECS
+    }
+
+    pub fn default_poll() -> u64 {
+        DEFAULT_POLL_SECS
+    }
+
+    pub fn config_path() -> PathBuf {
+        if let Some(base) = directories::ProjectDirs::from("io", "ArcCalc", "Helper") {
+            base.config_dir().join("config.json")
+        } else {
+            PathBuf::from("arccalc-helper-config.json")
+        }
+    }
+
+    pub fn load() -> Self {
+        let path = Self::config_path();
+        let mut cfg = match fs::read_to_string(&path) {
+            Ok(raw) => serde_json::from_str::<HelperConfig>(&raw).unwrap_or_default(),
+            Err(_) => HelperConfig::default(),
+        };
+        // Old builds defaulted to a few seconds — migrate to 3 minutes.
+        if cfg.poll_interval_secs < 60 {
+            cfg.poll_interval_secs = DEFAULT_POLL_SECS;
+        }
+        cfg.language = normalize_language(&cfg.language);
+        cfg.clamp()
+    }
+
+    pub fn save(&self) {
+        let path = Self::config_path();
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(raw) = serde_json::to_string_pretty(self) {
+            let _ = fs::write(path, raw);
+        }
+    }
+}
+
+pub fn normalize_language(code: &str) -> String {
+    match code {
+        "en" | "ru" | "de" | "fr" => code.to_string(),
+        _ => "en".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_language;
+
+    #[test]
+    fn unknown_language_is_english() {
+        assert_eq!(normalize_language(""), "en");
+        assert_eq!(normalize_language("ru"), "ru");
+        assert_eq!(normalize_language("es"), "en");
+    }
+}
+
+/// Writes or removes HKCU\...\Run\StashSync. No administrator rights.
+pub fn apply_run_at_startup(enabled: bool) {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok((key, _)) = hkcu.create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run") else {
+        return;
+    };
+    if !enabled {
+        let _ = key.delete_value("StashSync");
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let path = exe.display().to_string();
+    let value = if path.contains(' ') {
+        format!("\"{path}\"")
+    } else {
+        path
+    };
+    let _ = key.set_value("StashSync", &value);
+}

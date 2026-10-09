@@ -1,0 +1,12 @@
+target/
+installer/output/
+raw_inventory.*
+backup-*/
+qa-artifacts/
+fix-screenshots/
+*.log
+*.pdb
+sync-once-result.txt
+stash-probe.txt
+embark-session.json
+embark-session.json.tmp

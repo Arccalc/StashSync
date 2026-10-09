@@ -1,0 +1,37 @@
+[package]
+name = "arccalc-helper"
+version = "0.2.0"
+edition = "2021"
+description = "StashSync: local inventory sync for ARC Calc"
+publish = false
+
+[[bin]]
+name = "arccalc-helper"
+path = "src/main.rs"
+
+[[bin]]
+name = "StashSync"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.21"
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+steamworks = "0.13.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+winreg = "0.50"
+sha2 = "0.11.0"
+base64 = "0.22.1"
+chrono = "0.4.45"
+hex = "0.4.3"
+futures-util = "0.3.32"
+eframe = "0.31"
+directories = "6"
+
+[build-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
