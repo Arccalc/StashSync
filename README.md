@@ -35,6 +35,7 @@ Open **SETTINGS** in the StashSync window.
 - **Auto sync**: checks your stash on a timer, every 1 to 30 minutes. Press **Save** after changing it. With Auto sync off, only **Sync now** updates the inventory.
 - **Start with Windows**: adds or removes StashSync from your user startup list.
 - **Language**: English, Russian, German or French, the same list as the calculator.
+- **Goals overlay**: shows the materials for your craft goals on screen during a raid. Press **Goals overlay** in the StashSync window to turn it on. The list follows the craft goals on the calculator.
 
 StashSync does not watch the end of a raid and does not know the moment the game writes the new stash. The next **Sync now**, or the next auto-sync tick, reads whatever counts Embark returns at that time.
 
