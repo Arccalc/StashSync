@@ -3,7 +3,7 @@
 
 use std::fs::{self};
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -17,11 +17,13 @@ use tokio_tungstenite::tungstenite::http;
 
 mod config;
 mod embark_auth;
+mod hotkey;
 mod i18n;
 mod loadout;
 mod loadout_frames;
 mod loadout_names;
 mod mappings;
+mod overlay_win;
 mod state;
 mod theme;
 mod ui;
@@ -473,19 +475,31 @@ fn forbidden() -> http::Response<Option<String>> {
 async fn accept_calculator(
     stream: tokio::net::TcpStream,
     allowed: &[String],
-) -> Result<
+) -> Result<(
     tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-    tokio_tungstenite::tungstenite::Error,
-> {
+    bool,
+)> {
     let allowed = allowed.to_vec();
-    tokio_tungstenite::accept_hdr_async(stream, move |request: &Request, response: Response| {
-        if origin_allowed(request, &allowed) {
-            Ok(response)
-        } else {
-            Err(forbidden())
-        }
-    })
-    .await
+    let local = Arc::new(AtomicBool::new(false));
+    let local_flag = local.clone();
+    let stream = tokio_tungstenite::accept_hdr_async(
+        stream,
+        move |request: &Request, response: Response| {
+            let origin = request
+                .headers()
+                .get("origin")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("");
+            local_flag.store(local_page_origin(origin), Ordering::Relaxed);
+            if origin_allowed(request, &allowed) {
+                Ok(response)
+            } else {
+                Err(forbidden())
+            }
+        },
+    )
+    .await?;
+    Ok((stream, local.load(Ordering::Relaxed)))
 }
 
 fn start_background(state: Arc<SharedState>) {
@@ -538,7 +552,9 @@ async fn run_services(state: Arc<SharedState>) -> Result<()> {
                         let ws_clients = ws_clients.clone();
                         let allowed_origins = allowed_origins.clone();
                         tokio::spawn(async move {
-                            if let Ok(ws_stream) = accept_calculator(stream, &allowed_origins).await {
+                            if let Ok((ws_stream, local_page)) =
+                                accept_calculator(stream, &allowed_origins).await
+                            {
                                 let n = ws_clients.fetch_add(1, Ordering::Relaxed) + 1;
                                 state_ws.set_ws_clients(n);
                                 state_ws.set_websocket(
@@ -575,8 +591,18 @@ async fn run_services(state: Arc<SharedState>) -> Result<()> {
                                             }
                                         }
                                         msg = ws_receiver.next() => {
-                                            if msg.is_none() {
-                                                break;
+                                            match msg {
+                                                Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
+                                                    if let Some(view) =
+                                                        state::parse_overlay(&text, local_page)
+                                                    {
+                                                        state_ws.set_overlay(view);
+                                                    }
+                                                }
+                                                None
+                                                | Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_)))
+                                                | Some(Err(_)) => break,
+                                                _ => {}
                                             }
                                         }
                                     }
@@ -1400,7 +1426,10 @@ fn main() -> eframe::Result<()> {
             .with_min_inner_size([crate::theme::WIN_W, start_h])
             .with_decorations(false)
             .with_resizable(false)
-            .with_transparent(false)
+            // The corner overlay is a second window on this same GL setup.
+            // Windows only lets that window be see-through when the setup has an alpha channel.
+            // The main window still paints a solid panel, so it stays opaque.
+            .with_transparent(true)
             .with_icon(app_icon()),
         ..Default::default()
     };

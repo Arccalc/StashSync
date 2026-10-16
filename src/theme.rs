@@ -34,8 +34,10 @@ pub const CARD_GAP: f32 = 8.0;
 /// Inventory→Prepare Steam, Prepare Steam→settings card, last card→window bottom.
 pub const BLOCK_GAP: f32 = 16.0;
 pub const BTN_H: f32 = 42.0;
-/// Settings card: auto sync, interval, startup, language, Save.
-pub const SETTINGS_PANEL_H: f32 = 240.0;
+/// Quiet goals button under Sync now.
+pub const OVERLAY_BTN_H: f32 = 34.0;
+/// Settings card: sync, language, overlay layout, size, key, reset, Save.
+pub const SETTINGS_PANEL_H: f32 = 514.0;
 
 /// Full body stack height (must match draw_body exactly; item_spacing=0).
 /// Always ends with BLOCK_GAP under the last block.
@@ -44,8 +46,9 @@ pub fn content_stack_h(settings_open: bool) -> f32 {
     let mut h = 22.0 + SPACE_12;
     // Steam + Inventory
     h += CARD_H + CARD_GAP + CARD_H;
-    // Inventory → Prepare Steam
+    // Inventory → Sync now → goals overlay
     h += BLOCK_GAP + BTN_H;
+    h += SPACE_8 + OVERLAY_BTN_H;
     if settings_open {
         // Prepare Steam → UPDATE INTERVAL card
         h += BLOCK_GAP + SETTINGS_PANEL_H;

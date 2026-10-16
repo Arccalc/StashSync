@@ -3,7 +3,7 @@
 ; No administrator rights.
 
 #define MyAppName "StashSync"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.5"
 #define MyAppPublisher "Arccalc"
 #define MyAppURL "https://github.com/Arccalc/StashSync"
 #define MyAppExeName "StashSync.exe"

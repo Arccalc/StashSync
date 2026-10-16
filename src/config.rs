@@ -25,6 +25,19 @@ pub struct HelperConfig {
     pub run_at_startup: bool,
     /// en, ru, de, or fr. Empty or unknown means English.
     pub language: String,
+    /// Goal tiles in the corner, 0–100.
+    pub overlay_opacity: u8,
+    /// When true, the corner list is text. When false, it is icon squares.
+    pub overlay_list: bool,
+    /// Square icons run down, then across. Otherwise they run across, then down.
+    pub overlay_vertical: bool,
+    /// Icon size, 50–160 percent.
+    pub overlay_scale: u8,
+    /// Top-left of the overlay, in screen pixels.
+    pub overlay_x: i32,
+    pub overlay_y: i32,
+    /// Virtual-key code that toggles the overlay. F8 is 0x77.
+    pub overlay_vk: u32,
 }
 
 impl Default for HelperConfig {
@@ -35,6 +48,13 @@ impl Default for HelperConfig {
             auto_sync: true,
             run_at_startup: false,
             language: String::new(),
+            overlay_opacity: 100,
+            overlay_list: false,
+            overlay_vertical: false,
+            overlay_scale: 100,
+            overlay_x: 16,
+            overlay_y: 16,
+            overlay_vk: crate::hotkey::VK_F8,
         }
     }
 }
@@ -42,6 +62,13 @@ impl Default for HelperConfig {
 impl HelperConfig {
     pub fn clamp(mut self) -> Self {
         self.poll_interval_secs = self.poll_interval_secs.clamp(MIN_POLL_SECS, MAX_POLL_SECS);
+        self.overlay_opacity = self.overlay_opacity.clamp(0, 100);
+        self.overlay_scale = self.overlay_scale.clamp(50, 160);
+        if !(0x08..=0xFE).contains(&self.overlay_vk) {
+            self.overlay_vk = crate::hotkey::VK_F8;
+        }
+        self.overlay_x = self.overlay_x.clamp(-4000, 8000);
+        self.overlay_y = self.overlay_y.clamp(-4000, 8000);
         self
     }
 

@@ -27,6 +27,18 @@ pub enum Key {
     AutoSync,
     Startup,
     Language,
+    OverlayShow,
+    OverlayHide,
+    OverlayOpacity,
+    OverlayTiles,
+    OverlayList,
+    OverlayAcross,
+    OverlayDown,
+    OverlaySize,
+    OverlayKey,
+    OverlayKeyWait,
+    OverlayMove,
+    OverlayReset,
 }
 
 impl Lang {
@@ -152,6 +164,66 @@ impl Lang {
             (Lang::Ru, Key::Language) => "Язык",
             (Lang::De, Key::Language) => "Sprache",
             (Lang::Fr, Key::Language) => "Langue",
+
+            (Lang::En, Key::OverlayShow) => "Goals overlay",
+            (Lang::Ru, Key::OverlayShow) => "Цели крафта",
+            (Lang::De, Key::OverlayShow) => "Craft-Ziele",
+            (Lang::Fr, Key::OverlayShow) => "Objectifs de craft",
+
+            (Lang::En, Key::OverlayHide) => "Hide goals",
+            (Lang::Ru, Key::OverlayHide) => "Скрыть цели",
+            (Lang::De, Key::OverlayHide) => "Ziele ausblenden",
+            (Lang::Fr, Key::OverlayHide) => "Masquer les objectifs",
+
+            (Lang::En, Key::OverlayOpacity) => "Opacity",
+            (Lang::Ru, Key::OverlayOpacity) => "Прозрачность",
+            (Lang::De, Key::OverlayOpacity) => "Deckkraft",
+            (Lang::Fr, Key::OverlayOpacity) => "Opacité",
+
+            (Lang::En, Key::OverlayTiles) => "Squares",
+            (Lang::Ru, Key::OverlayTiles) => "Квадраты",
+            (Lang::De, Key::OverlayTiles) => "Kacheln",
+            (Lang::Fr, Key::OverlayTiles) => "Carrés",
+
+            (Lang::En, Key::OverlayList) => "List",
+            (Lang::Ru, Key::OverlayList) => "Список",
+            (Lang::De, Key::OverlayList) => "Liste",
+            (Lang::Fr, Key::OverlayList) => "Liste",
+
+            (Lang::En, Key::OverlayAcross) => "Horizontal",
+            (Lang::Ru, Key::OverlayAcross) => "Горизонтально",
+            (Lang::De, Key::OverlayAcross) => "Horizontal",
+            (Lang::Fr, Key::OverlayAcross) => "Horizontal",
+
+            (Lang::En, Key::OverlayDown) => "Vertical",
+            (Lang::Ru, Key::OverlayDown) => "Вертикально",
+            (Lang::De, Key::OverlayDown) => "Vertikal",
+            (Lang::Fr, Key::OverlayDown) => "Vertical",
+
+            (Lang::En, Key::OverlaySize) => "Size",
+            (Lang::Ru, Key::OverlaySize) => "Размер",
+            (Lang::De, Key::OverlaySize) => "Größe",
+            (Lang::Fr, Key::OverlaySize) => "Taille",
+
+            (Lang::En, Key::OverlayKey) => "Key",
+            (Lang::Ru, Key::OverlayKey) => "Клавиша",
+            (Lang::De, Key::OverlayKey) => "Taste",
+            (Lang::Fr, Key::OverlayKey) => "Touche",
+
+            (Lang::En, Key::OverlayKeyWait) => "Press a key",
+            (Lang::Ru, Key::OverlayKeyWait) => "Нажмите клавишу",
+            (Lang::De, Key::OverlayKeyWait) => "Taste drücken",
+            (Lang::Fr, Key::OverlayKeyWait) => "Appuyez",
+
+            (Lang::En, Key::OverlayMove) => "Move",
+            (Lang::Ru, Key::OverlayMove) => "Двигать",
+            (Lang::De, Key::OverlayMove) => "Verschieben",
+            (Lang::Fr, Key::OverlayMove) => "Déplacer",
+
+            (Lang::En, Key::OverlayReset) => "Reset to default",
+            (Lang::Ru, Key::OverlayReset) => "Вернуть по умолчанию",
+            (Lang::De, Key::OverlayReset) => "Auf Standard",
+            (Lang::Fr, Key::OverlayReset) => "Par défaut",
         }
     }
 }

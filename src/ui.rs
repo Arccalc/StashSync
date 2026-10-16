@@ -6,10 +6,11 @@ use std::sync::Arc;
 
 use eframe::egui::{
     self, pos2, vec2, Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily,
-    FontId, Frame, Layout, Margin, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
+    FontId, Frame, Layout, Margin, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
 };
 
 use crate::config::HelperConfig;
+use crate::hotkey::Hotkey;
 use crate::i18n::{self, Key, Lang};
 use crate::state::{ConnState, SharedState};
 use crate::theme::{self, *};
@@ -21,6 +22,10 @@ pub struct HelperApp {
     config: HelperConfig,
     show_settings: bool,
     lang: Lang,
+    overlay_open: bool,
+    overlay_move: bool,
+    key_listen: bool,
+    hotkey: Hotkey,
 }
 
 impl HelperApp {
@@ -34,6 +39,13 @@ impl HelperApp {
         let poll_minutes = (config.poll_interval_secs as f32 / 60.0).clamp(1.0, 30.0);
         let interval_text = minutes_label(poll_minutes);
         let lang = Lang::parse(&config.language);
+        let (hotkey, hotkey_ok) = crate::hotkey::spawn(config.overlay_vk);
+        if !hotkey_ok {
+            state.log(format!(
+                "Overlay hotkey {} is busy",
+                crate::hotkey::key_label(config.overlay_vk)
+            ));
+        }
         Self {
             state,
             poll_minutes,
@@ -41,11 +53,31 @@ impl HelperApp {
             config,
             show_settings: false,
             lang,
+            overlay_open: false,
+            overlay_move: false,
+            key_listen: false,
+            hotkey,
         }
     }
 
     fn persist(&mut self) {
         self.config.save();
+    }
+
+    fn reset_overlay(&mut self) {
+        let fresh = HelperConfig::default();
+        self.config.overlay_opacity = fresh.overlay_opacity;
+        self.config.overlay_list = fresh.overlay_list;
+        self.config.overlay_vertical = fresh.overlay_vertical;
+        self.config.overlay_scale = fresh.overlay_scale;
+        self.config.overlay_x = fresh.overlay_x;
+        self.config.overlay_y = fresh.overlay_y;
+        self.config.overlay_vk = fresh.overlay_vk;
+        self.overlay_move = false;
+        self.key_listen = false;
+        self.hotkey.rebind(fresh.overlay_vk);
+        crate::overlay_win::place_at(fresh.overlay_x, fresh.overlay_y);
+        self.persist();
     }
 
     fn set_auto(&mut self, on: bool) {
@@ -98,7 +130,33 @@ impl HelperApp {
 
 impl eframe::App for HelperApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(std::time::Duration::from_millis(350));
+        if self.overlay_move {
+            ctx.request_repaint();
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(350));
+        }
+        if self.key_listen {
+            if let Some(vk) = captured_key(ctx) {
+                self.key_listen = false;
+                if vk != 0x1B {
+                    self.config.overlay_vk = vk;
+                    self.hotkey.rebind(vk);
+                    self.persist();
+                }
+            }
+        } else if self.hotkey.take_press() {
+            self.overlay_open = !self.overlay_open;
+        }
+        let applied = self.hotkey.applied();
+        if applied != 0 && applied != self.config.overlay_vk && !self.key_listen {
+            self.config.overlay_vk = applied;
+            self.persist();
+        }
+        if let Some((x, y)) = crate::overlay_win::take_dragged() {
+            self.config.overlay_x = x;
+            self.config.overlay_y = y;
+            self.persist();
+        }
 
         let h = self.window_height();
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(WIN_W, h)));
@@ -148,6 +206,25 @@ impl eframe::App for HelperApp {
                         });
                 });
             });
+
+        let goals = self.state.overlay();
+        crate::overlay_win::sync(
+            self.overlay_open,
+            &crate::overlay_win::OverlayFrame {
+                list: self.config.overlay_list,
+                vertical: self.config.overlay_vertical,
+                opacity: self.config.overlay_opacity,
+                scale_pct: self.config.overlay_scale,
+                x: self.config.overlay_x,
+                y: self.config.overlay_y,
+                movable: self.overlay_open && self.overlay_move,
+            },
+            &goals.tiles,
+        );
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 }
 
@@ -335,6 +412,12 @@ fn draw_body(ui: &mut Ui, snap: &crate::state::StatusSnapshot, app: &mut HelperA
         app.state.force_poll.store(true, Ordering::Relaxed);
     }
 
+    ui.add_space(SPACE_8);
+    let key_name = crate::hotkey::key_label(app.config.overlay_vk);
+    if overlay_cta(ui, full_w, app.overlay_open, app.lang, &key_name) {
+        app.overlay_open = !app.overlay_open;
+    }
+
     // Settings open: same BLOCK_GAP above the UPDATE INTERVAL card.
     if app.show_settings {
         ui.add_space(BLOCK_GAP);
@@ -342,6 +425,13 @@ fn draw_body(ui: &mut Ui, snap: &crate::state::StatusSnapshot, app: &mut HelperA
         let mut auto = app.config.auto_sync;
         let mut startup = app.config.run_at_startup;
         let mut lang = app.lang;
+        let mut opacity = app.config.overlay_opacity;
+        let mut opacity_settled = false;
+        let mut list_mode = app.config.overlay_list;
+        let mut vertical = app.config.overlay_vertical;
+        let mut scale = app.config.overlay_scale;
+        let mut move_mode = app.overlay_move;
+        let mut reset_overlay = false;
         settings_panel(
             ui,
             full_w,
@@ -351,8 +441,34 @@ fn draw_body(ui: &mut Ui, snap: &crate::state::StatusSnapshot, app: &mut HelperA
             &mut auto,
             &mut startup,
             &mut lang,
+            &mut opacity,
+            &mut opacity_settled,
+            &mut list_mode,
+            &mut vertical,
+            &mut scale,
+            &mut app.key_listen,
+            &key_name,
+            &mut move_mode,
             &mut save,
+            &mut reset_overlay,
         );
+        app.overlay_move = move_mode;
+        app.config.overlay_opacity = opacity;
+        app.config.overlay_scale = scale;
+        if list_mode != app.config.overlay_list {
+            app.config.overlay_list = list_mode;
+            opacity_settled = true;
+        }
+        if vertical != app.config.overlay_vertical {
+            app.config.overlay_vertical = vertical;
+            opacity_settled = true;
+        }
+        if opacity_settled {
+            app.persist();
+        }
+        if reset_overlay {
+            app.reset_overlay();
+        }
         if auto != app.config.auto_sync {
             app.set_auto(auto);
         }
@@ -627,6 +743,43 @@ fn primary_cta(ui: &mut Ui, full_w: f32, label: &str, enabled: bool) -> bool {
     clicked
 }
 
+fn overlay_cta(ui: &mut Ui, full_w: f32, open: bool, lang: Lang, key_name: &str) -> bool {
+    let (id, rect) = ui.allocate_space(vec2(full_w, OVERLAY_BTN_H));
+    let resp = ui.interact(rect, id, Sense::click());
+    let fill = if resp.hovered() { card_hover() } else { card() };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(R_BTN), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(R_BTN),
+        Stroke::new(1.0, if open { accent() } else { border() }),
+        StrokeKind::Inside,
+    );
+    let label = if open {
+        lang.text(Key::OverlayHide)
+    } else {
+        lang.text(Key::OverlayShow)
+    };
+    ui.painter().text(
+        pos2(rect.left() + 14.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::new(TEXT_BTN, FontFamily::Name(FONT_SANS.into())),
+        if open { fg() } else { fg_soft() },
+    );
+    ui.painter().text(
+        pos2(rect.right() - 14.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        key_name,
+        FontId::new(13.0, FontFamily::Name(FONT_MONO.into())),
+        if open { accent() } else { fg_dim() },
+    );
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
+}
+
 // ----- settings --------------------------------------------------------------
 
 /// Same horizontal geometry as `status_card`: allocate exactly `full_w`.
@@ -639,7 +792,16 @@ fn settings_panel(
     auto_sync: &mut bool,
     startup: &mut bool,
     language: &mut Lang,
+    opacity: &mut u8,
+    opacity_settled: &mut bool,
+    list_mode: &mut bool,
+    vertical: &mut bool,
+    scale: &mut u8,
+    key_listen: &mut bool,
+    key_name: &str,
+    move_mode: &mut bool,
     save_clicked: &mut bool,
+    reset_clicked: &mut bool,
 ) {
     let panel_h = SETTINGS_PANEL_H;
     let (id, rect) = ui.allocate_space(vec2(full_w, panel_h));
@@ -707,6 +869,48 @@ fn settings_panel(
         vec2(content.width(), 36.0),
     );
     language_row(ui, lang_row, lang, language);
+
+    let style_row = Rect::from_min_size(
+        pos2(content.left(), content.top() + 178.0),
+        vec2(content.width(), 32.0),
+    );
+    overlay_style_row(ui, style_row, lang, list_mode);
+
+    let opacity_row = Rect::from_min_size(
+        pos2(content.left(), content.top() + 216.0),
+        vec2(content.width(), 48.0),
+    );
+    if opacity_slider(ui, opacity_row, lang, opacity) {
+        *opacity_settled = true;
+    }
+
+    let direction_row = Rect::from_min_size(
+        pos2(content.left(), content.top() + 272.0),
+        vec2(content.width(), 32.0),
+    );
+    overlay_direction_row(ui, direction_row, lang, vertical);
+
+    let size_row = Rect::from_min_size(
+        pos2(content.left(), content.top() + 312.0),
+        vec2(content.width(), 48.0),
+    );
+    if percent_slider(ui, size_row, lang.text(Key::OverlaySize), scale, 50, 160) {
+        *opacity_settled = true;
+    }
+
+    let key_row = Rect::from_min_size(
+        pos2(content.left(), content.top() + 368.0),
+        vec2(content.width(), 36.0),
+    );
+    overlay_key_row(ui, key_row, lang, key_listen, key_name, move_mode);
+
+    let reset = Rect::from_min_size(
+        pos2(content.left(), content.top() + 412.0),
+        vec2(content.width(), 32.0),
+    );
+    if style_choice(ui, reset, false, lang.text(Key::OverlayReset), "overlay_reset") {
+        *reset_clicked = true;
+    }
 
     let save_h = 34.0;
     let save = Rect::from_min_max(
@@ -779,6 +983,202 @@ fn toggle_row(ui: &mut Ui, rect: Rect, on: bool, label: &str, salt: &str) -> boo
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     resp.clicked()
+}
+
+fn overlay_direction_row(ui: &mut Ui, rect: Rect, lang: Lang, vertical: &mut bool) {
+    let gap = 8.0;
+    let width = (rect.width() - gap) * 0.5;
+    let across = Rect::from_min_size(rect.min, vec2(width, rect.height()));
+    let down = Rect::from_min_size(
+        pos2(across.right() + gap, rect.top()),
+        vec2(width, rect.height()),
+    );
+    if style_choice(ui, across, !*vertical, lang.text(Key::OverlayAcross), "overlay_across") {
+        *vertical = false;
+    }
+    if style_choice(ui, down, *vertical, lang.text(Key::OverlayDown), "overlay_down") {
+        *vertical = true;
+    }
+}
+
+fn overlay_key_row(
+    ui: &mut Ui,
+    rect: Rect,
+    lang: Lang,
+    key_listen: &mut bool,
+    key_name: &str,
+    move_mode: &mut bool,
+) {
+    let gap = 8.0;
+    let width = (rect.width() - gap) * 0.5;
+    let key_rect = Rect::from_min_size(rect.min, vec2(width, rect.height()));
+    let move_rect = Rect::from_min_size(
+        pos2(key_rect.right() + gap, rect.top()),
+        vec2(width, rect.height()),
+    );
+    let key_label = if *key_listen {
+        lang.text(Key::OverlayKeyWait).to_string()
+    } else {
+        format!("{}: {key_name}", lang.text(Key::OverlayKey))
+    };
+    if style_choice(ui, key_rect, *key_listen, &key_label, "overlay_key") {
+        *key_listen = !*key_listen;
+    }
+    if style_choice(ui, move_rect, *move_mode, lang.text(Key::OverlayMove), "overlay_move") {
+        *move_mode = !*move_mode;
+    }
+}
+
+fn percent_slider(ui: &mut Ui, rect: Rect, label: &str, value: &mut u8, min: u8, max: u8) -> bool {
+    ui.painter().text(
+        pos2(rect.left(), rect.top() + 8.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::new(TEXT_BODY, FontFamily::Name(FONT_SANS.into())),
+        fg_soft(),
+    );
+    ui.painter().text(
+        pos2(rect.right(), rect.top() + 8.0),
+        Align2::RIGHT_CENTER,
+        format!("{value}%"),
+        FontId::new(13.0, FontFamily::Name(FONT_MONO.into())),
+        accent(),
+    );
+    let slider_rect = Rect::from_min_size(
+        pos2(rect.left(), rect.top() + 20.0),
+        vec2(rect.width(), 22.0),
+    );
+    let mut slider = f32::from(*value);
+    let response = ui
+        .allocate_ui_at_rect(slider_rect, |ui| {
+            ui.spacing_mut().slider_width = slider_rect.width() - 16.0;
+            ui.add(egui::Slider::new(&mut slider, f32::from(min)..=f32::from(max)).show_value(false))
+        })
+        .inner;
+    *value = slider.round().clamp(f32::from(min), f32::from(max)) as u8;
+    response.drag_stopped() || response.clicked()
+}
+
+fn captured_key(ctx: &egui::Context) -> Option<u32> {
+    ctx.input(|input| {
+        for event in &input.events {
+            let egui::Event::Key {
+                key,
+                pressed: true,
+                repeat: false,
+                modifiers,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            if modifiers.ctrl || modifiers.alt || modifiers.command {
+                continue;
+            }
+            if *key == egui::Key::Escape {
+                return Some(0x1B);
+            }
+            if let Some(vk) = vk_of(*key) {
+                return Some(vk);
+            }
+        }
+        None
+    })
+}
+
+fn vk_of(key: egui::Key) -> Option<u32> {
+    let name = format!("{key:?}");
+    if name.len() == 1 {
+        let byte = name.as_bytes()[0];
+        if byte.is_ascii_alphabetic() || byte.is_ascii_digit() {
+            return Some(u32::from(byte.to_ascii_uppercase()));
+        }
+    }
+    if let Some(rest) = name.strip_prefix('F') {
+        if let Ok(n) = rest.parse::<u32>() {
+            if (1..=12).contains(&n) {
+                return Some(0x6F + n);
+            }
+        }
+    }
+    if let Some(rest) = name.strip_prefix("Num") {
+        if let Ok(n) = rest.parse::<u32>() {
+            if n <= 9 {
+                return Some(0x30 + n);
+            }
+        }
+    }
+    None
+}
+
+fn overlay_style_row(ui: &mut Ui, rect: Rect, lang: Lang, list_mode: &mut bool) {
+    let gap = 8.0;
+    let width = (rect.width() - gap) * 0.5;
+    let tiles = Rect::from_min_size(rect.min, vec2(width, rect.height()));
+    let list = Rect::from_min_size(
+        pos2(tiles.right() + gap, rect.top()),
+        vec2(width, rect.height()),
+    );
+    if style_choice(ui, tiles, !*list_mode, lang.text(Key::OverlayTiles), "overlay_tiles") {
+        *list_mode = false;
+    }
+    if style_choice(ui, list, *list_mode, lang.text(Key::OverlayList), "overlay_list") {
+        *list_mode = true;
+    }
+}
+
+fn style_choice(ui: &mut Ui, rect: Rect, on: bool, label: &str, salt: &str) -> bool {
+    let resp = ui.interact(rect, ui.id().with(salt), Sense::click());
+    let fill = if resp.hovered() { card_hover() } else { input() };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(R_BTN), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(R_BTN),
+        Stroke::new(1.0, if on { accent() } else { border() }),
+        StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::new(13.0, FontFamily::Name(FONT_SANS.into())),
+        if on { accent() } else { fg_soft() },
+    );
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.clicked()
+}
+
+fn opacity_slider(ui: &mut Ui, rect: Rect, lang: Lang, opacity: &mut u8) -> bool {
+    ui.painter().text(
+        pos2(rect.left(), rect.top() + 8.0),
+        Align2::LEFT_CENTER,
+        lang.text(Key::OverlayOpacity),
+        FontId::new(TEXT_BODY, FontFamily::Name(FONT_SANS.into())),
+        fg_soft(),
+    );
+    ui.painter().text(
+        pos2(rect.right(), rect.top() + 8.0),
+        Align2::RIGHT_CENTER,
+        format!("{opacity}%"),
+        FontId::new(13.0, FontFamily::Name(FONT_MONO.into())),
+        accent(),
+    );
+    let slider_rect = Rect::from_min_size(
+        pos2(rect.left(), rect.top() + 20.0),
+        vec2(rect.width(), 22.0),
+    );
+    let mut value = f32::from(*opacity);
+    let response = ui
+        .allocate_ui_at_rect(slider_rect, |ui| {
+            ui.spacing_mut().slider_width = slider_rect.width() - 16.0;
+            ui.add(egui::Slider::new(&mut value, 0.0..=100.0).show_value(false))
+        })
+        .inner;
+    *opacity = value.round().clamp(0.0, 100.0) as u8;
+    response.drag_stopped() || response.clicked()
 }
 
 fn language_row(ui: &mut Ui, rect: Rect, ui_lang: Lang, language: &mut Lang) {

@@ -25,7 +25,7 @@ fn main() {
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
-      version="0.2.0.0"
+      version="0.2.5.0"
       processorArchitecture="*"
       name="StashSync"
       type="win32"
