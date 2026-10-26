@@ -7,6 +7,7 @@ StashSync is a small Windows program that reads **your own** ARC Raiders stash a
 ## What you need
 
 - Windows 10 or 11.
+- [Microsoft Edge WebView2 Runtime](https://go.microsoft.com/fwlink/p/?LinkId=2124703) for the window. Windows 11 already has it, and Windows 10 gets it with Edge updates. If it is missing, the installer and StashSync itself say so and offer Microsoft's download page.
 - Steam, signed in to the account that owns the **Steam** edition of ARC Raiders. An Epic-only copy does not work.
 - The ARC Calc page open in a browser **on the same computer**.
 

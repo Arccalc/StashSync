@@ -1443,9 +1443,19 @@ fn main() {
         let _ = fs::write("stash-probe.txt", &report);
         return;
     }
+    // Starting the app again shows the running copy. Debug builds driven over
+    // DevTools (STASHSYNC_CDP) may run next to an installed copy.
+    let test_build = cfg!(debug_assertions) && std::env::var_os("STASHSYNC_CDP").is_some();
+    if !test_build && !win::first_instance() {
+        return;
+    }
 
     let config = HelperConfig::load();
     config::apply_run_at_startup(config.run_at_startup);
+    // Windows start: stay in the tray unless there is still a sign-in to do.
+    let start_in_tray = std::env::args().any(|arg| arg == config::TRAY_ARG)
+        && !config.signed_out
+        && embark_auth::has_session();
     let state = SharedState::new(config.poll_interval_secs, config.auto_sync);
     state.signed_out.store(config.signed_out, Ordering::Relaxed);
     state.log("StashSync started");
@@ -1460,7 +1470,7 @@ fn main() {
     }
 
     start_background(state.clone());
-    app::run(state, config);
+    app::run(state, config, start_in_tray);
 }
 
 #[cfg(test)]

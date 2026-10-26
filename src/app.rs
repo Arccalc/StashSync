@@ -84,10 +84,11 @@ struct App {
     last_overlay_at: Instant,
     tray_dot: &'static str,
     config_dirty: bool,
-    told_minimized: bool,
+    /// The «still in the tray» notification is shown once per run.
+    told_tray: bool,
 }
 
-pub fn run(state: Arc<SharedState>, config: HelperConfig) -> ! {
+pub fn run(state: Arc<SharedState>, config: HelperConfig, start_in_tray: bool) -> ! {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
@@ -109,6 +110,7 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig) -> ! {
         .with_decorations(false)
         .with_undecorated_shadow(true)
         .with_window_icon(icon)
+        .with_visible(!start_in_tray)
         .build(&event_loop)
         .expect("window");
     win::round_corners(main_window.hwnd());
@@ -116,13 +118,19 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig) -> ! {
     let main_view = match build_page(&mut context, &main_window, "/index.html", Target::Main, &proxy) {
         Ok(view) => view,
         Err(err) => {
-            win::message_box(
-                "StashSync",
-                &format!(
-                    "StashSync needs Microsoft Edge WebView2 Runtime.\n\
-                     Download it from https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n{err}"
-                ),
-            );
+            // Microsoft's own check (GetAvailableCoreWebView2BrowserVersionString) also finds
+            // per-user and fixed-version runtimes. Only when it finds none is the runtime missing;
+            // any other failure shows the error itself.
+            if wry::webview_version().is_err() {
+                if win::ask_yes_no("StashSync", webview_missing_text(&config.language)) {
+                    win::open_url(win::WEBVIEW2_URL);
+                }
+            } else {
+                win::message_box(
+                    "StashSync",
+                    &format!("{}\n\n{err}", window_failed_text(&config.language)),
+                );
+            }
             std::process::exit(1);
         }
     };
@@ -165,8 +173,12 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig) -> ! {
         last_overlay_at: Instant::now(),
         tray_dot: "wait",
         config_dirty: false,
-        told_minimized: false,
+        told_tray: false,
     };
+    if start_in_tray {
+        let _ = app.main.view.set_visible(false);
+        let _ = app.main.view.set_memory_usage_level(MemoryUsageLevel::Low);
+    }
 
     let tick = Duration::from_millis(250);
     event_loop.run(move |event, target: &EventLoopWindowTarget<UserEvent>, control_flow| {
@@ -198,9 +210,12 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig) -> ! {
                         app.hide_fly_if_away();
                     }
                 } else if window_id == app.main.window.id() {
+                    // Alt+F4 works like the window's ×.
                     if let WindowEvent::CloseRequested = event {
-                        app.quit();
-                        *control_flow = ControlFlow::Exit;
+                        if app.close_main() {
+                            app.quit();
+                            *control_flow = ControlFlow::Exit;
+                        }
                     }
                 }
             }
@@ -315,12 +330,39 @@ fn tray_menu_text(lang: &str) -> [&'static str; 2] {
     }
 }
 
-fn minimized_text(lang: &str) -> &'static str {
+fn webview_missing_text(lang: &str) -> &'static str {
     match lang {
-        "ru" => "StashSync свёрнут. Склад продолжает обновляться.",
-        "de" => "StashSync ist minimiert. Das Lager wird weiter aktualisiert.",
-        "fr" => "StashSync est réduit. La réserve continue de se mettre à jour.",
-        _ => "StashSync is minimized. The stash keeps updating.",
+        "ru" => "Для окна StashSync нужен Microsoft Edge WebView2 Runtime, а на этом компьютере его нет. Открыть страницу загрузки Microsoft?\n\nПосле установки запустите StashSync снова.",
+        "de" => "Das Fenster von StashSync braucht die Microsoft Edge WebView2 Runtime, die auf diesem PC fehlt. Die Downloadseite von Microsoft öffnen?\n\nStarten Sie StashSync nach der Installation erneut.",
+        "fr" => "La fenêtre de StashSync a besoin de Microsoft Edge WebView2 Runtime, absent sur ce PC. Ouvrir la page de téléchargement de Microsoft ?\n\nRelancez StashSync après l’installation.",
+        _ => "The StashSync window needs Microsoft Edge WebView2 Runtime, which is missing on this PC. Open Microsoft's download page?\n\nStart StashSync again after installing it.",
+    }
+}
+
+fn window_failed_text(lang: &str) -> &'static str {
+    match lang {
+        "ru" => "StashSync не смог открыть окно. Перезапустите программу; если ошибка повторится, сообщите о ней на GitHub.",
+        "de" => "StashSync konnte sein Fenster nicht öffnen. Starten Sie das Programm neu; tritt der Fehler wieder auf, melden Sie ihn auf GitHub.",
+        "fr" => "StashSync n’a pas pu ouvrir sa fenêtre. Relancez l’appli ; si l’erreur revient, signalez-la sur GitHub.",
+        _ => "StashSync could not open its window. Restart it; if the error comes back, please report it on GitHub.",
+    }
+}
+
+fn in_tray_text(lang: &str) -> &'static str {
+    match lang {
+        "ru" => "StashSync в трее и продолжает обновлять склад. Выйти: правый клик по значку.",
+        "de" => "StashSync läuft im Infobereich weiter und aktualisiert das Lager. Beenden: Rechtsklick auf das Symbol.",
+        "fr" => "StashSync reste dans la zone de notification et met la réserve à jour. Quitter : clic droit sur l’icône.",
+        _ => "StashSync is in the tray and keeps updating the stash. To quit, right-click its icon.",
+    }
+}
+
+fn sign_in_text(lang: &str) -> &'static str {
+    match lang {
+        "ru" => "Нужно снова войти, иначе склад не обновится. Нажмите, чтобы открыть StashSync.",
+        "de" => "Bitte erneut anmelden, sonst wird das Lager nicht aktualisiert. Klicken, um StashSync zu öffnen.",
+        "fr" => "Reconnectez-vous, sinon la réserve ne sera pas mise à jour. Cliquez pour ouvrir StashSync.",
+        _ => "Sign in again, or the stash will not update. Click to open StashSync.",
     }
 }
 
@@ -328,7 +370,13 @@ impl App {
     fn tick(&mut self) {
         if self.last_probe.elapsed() >= Duration::from_secs(1) {
             self.last_probe = Instant::now();
+            let was_signed_in = self.signed_in;
             self.signed_in = embark_auth::has_session();
+            // Sign-in lost while the window is away: the stash stops updating, say so.
+            let window_away = !self.main.window.is_visible() || self.main.window.is_minimized();
+            if was_signed_in && !self.signed_in && !self.config.signed_out && window_away {
+                win::tray_balloon("StashSync", sign_in_text(&self.config.language));
+            }
             self.steam_on = win::steam_signed_in();
             // The process list matters only before the first sign-in.
             self.game_on = !self.signed_in && win::process_running(GAME_EXE);
@@ -398,6 +446,7 @@ impl App {
             "auto": self.config.auto_sync,
             "interval": (self.config.poll_interval_secs / 60).clamp(1, 30),
             "startup": self.config.run_at_startup,
+            "closeQuits": self.config.close_quits,
             "ov": {
                 "shown": self.config.overlay_shown,
                 "list": self.config.overlay_list,
@@ -550,10 +599,19 @@ impl App {
         self.main.window.set_visible(false);
         let _ = self.main.view.set_visible(false);
         let _ = self.main.view.set_memory_usage_level(MemoryUsageLevel::Low);
-        if !self.told_minimized {
-            self.told_minimized = true;
-            win::tray_balloon("StashSync", minimized_text(&self.config.language));
+        if !self.told_tray {
+            self.told_tray = true;
+            win::tray_balloon("StashSync", in_tray_text(&self.config.language));
         }
+    }
+
+    /// The window's × and Alt+F4. Returns true when the app should quit.
+    fn close_main(&mut self) -> bool {
+        if self.config.close_quits {
+            return true;
+        }
+        self.hide_main();
+        false
     }
 
     fn show_fly(&mut self, target: &EventLoopWindowTarget<UserEvent>) {
@@ -632,7 +690,7 @@ impl App {
     /// Returns true when the app should quit.
     fn on_tray(&mut self, click: TrayClick, target: &EventLoopWindowTarget<UserEvent>) -> bool {
         match click {
-            TrayClick::Double => self.show_main(),
+            TrayClick::Double | TrayClick::Activate => self.show_main(),
             TrayClick::Right => {
                 self.hide_fly();
                 let [open, quit] = tray_menu_text(&self.config.language);
@@ -733,6 +791,10 @@ impl App {
                     self.config_dirty = true;
                 }
             }
+            "setCloseQuits" => {
+                self.config.close_quits = on;
+                self.config_dirty = true;
+            }
             "setLang" => {
                 let code = msg.get("lang").and_then(Value::as_str).unwrap_or("en");
                 self.config.language = normalize_language(code);
@@ -797,7 +859,8 @@ impl App {
                 self.hotkey.rebind(fresh.overlay_vk);
                 self.config_dirty = true;
             }
-            "minimize" => self.hide_main(),
+            "minimize" => self.main.window.set_minimized(true),
+            "close" => return self.close_main(),
             "openWindow" => self.show_main(),
             "quit" => return true,
             "drag" => {

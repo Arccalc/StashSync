@@ -28,6 +28,9 @@ fn main() {
         res.set_icon("assets/icon.ico");
         res.set("ProductName", "StashSync");
         res.set("FileDescription", "StashSync inventory sync");
+        res.set("CompanyName", "Arccalc");
+        res.set("LegalCopyright", "Copyright (C) 2026 Arccalc");
+        res.set("OriginalFilename", "StashSync.exe");
         res.set_manifest(
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">

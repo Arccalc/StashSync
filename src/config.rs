@@ -48,6 +48,8 @@ pub struct HelperConfig {
     pub overlay_shown: bool,
     /// Set by «Sign out». The app waits for «Sign in» before it asks Steam again.
     pub signed_out: bool,
+    /// The window's × quits. Off: × hides the window to the tray and sync goes on.
+    pub close_quits: bool,
 }
 
 impl Default for HelperConfig {
@@ -69,6 +71,7 @@ impl Default for HelperConfig {
             overlay_hide_done: true,
             overlay_shown: false,
             signed_out: false,
+            close_quits: false,
         }
     }
 }
@@ -153,6 +156,9 @@ mod tests {
     }
 }
 
+/// Command-line flag of the Run key: start without the window when already signed in.
+pub const TRAY_ARG: &str = "--tray";
+
 /// Writes or removes HKCU\...\Run\StashSync. No administrator rights.
 pub fn apply_run_at_startup(enabled: bool) {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -166,11 +172,7 @@ pub fn apply_run_at_startup(enabled: bool) {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    let path = exe.display().to_string();
-    let value = if path.contains(' ') {
-        format!("\"{path}\"")
-    } else {
-        path
-    };
+    // Started by Windows, the app goes straight to the tray (see `TRAY_ARG`).
+    let value = format!("\"{}\" {TRAY_ARG}", exe.display());
     let _ = key.set_value("StashSync", &value);
 }

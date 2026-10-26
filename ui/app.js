@@ -115,6 +115,7 @@
 
   // ---------- main window ----------
   function titlebar() {
+    const closeLabel = S.closeQuits ? t('quitApp') : t('closeTray');
     return '<div data-drag="1" style="flex: none; height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 18px; border-bottom: 1px solid #2A2550">' +
       ARC(26, 18) +
       '<div class="cb-u" style="font-weight: 700; font-size: 14px; letter-spacing: -0.01em">StashSync</div>' +
@@ -131,7 +132,7 @@
       '<button class="cb-wbtn" data-tour="help" aria-label="' + esc(t('help')) + '" title="' + esc(t('help')) + '" data-act="tour"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"></circle><path d="M6.2 6.3a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path><circle cx="8" cy="11.6" r=".9" fill="currentColor"></circle></svg></button>' +
       '<span data-tour="winbtns" style="display: flex; gap: 10px">' +
       '<button class="cb-wbtn" aria-label="' + esc(t('minimize')) + '" title="' + esc(t('minimize')) + '" data-act="minimize"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg></button>' +
-      '<button class="cb-wbtn cb-wclose" aria-label="' + esc(t('quitApp')) + '" title="' + esc(t('quitApp')) + '" data-act="quit"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg></button>' +
+      '<button class="cb-wbtn cb-wclose" aria-label="' + esc(closeLabel) + '" title="' + esc(closeLabel) + '" data-act="close"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg></button>' +
       '</span></div>';
   }
 
@@ -380,7 +381,8 @@
       '<span class="cb-tnum" style="min-width: 64px; text-align: center; font-weight: 600; font-size: 15px">' + esc(t('minutes', s.interval)) + '</span>' +
       '<button class="cb-step" aria-label="' + esc(t('oftener')) + '" data-act="intInc"' + (!s.auto || s.interval >= 30 ? ' disabled' : '') + '>+</button>' +
       '</div></div></div>' +
-      '<div class="cb-card"><div class="cb-crow"><span class="cb-clab">' + esc(t('startup')) + '</span>' + sw(s.startup, 'setStartup', t('startup')) + '</div></div>' +
+      '<div class="cb-card"><div class="cb-crow"><span class="cb-clab">' + esc(t('startup')) + '</span>' + sw(s.startup, 'setStartup', t('startup')) + '</div>' +
+      '<div class="cb-crow cb-cdiv"><div style="min-width: 0"><div class="cb-clab">' + esc(t('closeQuits')) + '</div><div class="cb-csub">' + esc(t('closeQuitsSub')) + '</div></div>' + sw(s.closeQuits, 'setCloseQuits', t('closeQuits')) + '</div></div>' +
       '<div class="cb-card" style="padding: 14px 16px"><div class="cb-clab" style="margin-bottom: 10px">' + esc(t('language')) + '</div>' +
       '<div class="cb-seg">' + langs.map((l) => '<button data-on="' + (s.lang === l) + '" data-act="setLang" data-lang="' + l + '">' + l.toUpperCase() + '</button>').join('') + '</div></div>' +
       '<div class="cb-card" data-tour="set-login"><div class="cb-crow"><div style="min-width: 0"><div class="cb-clab">' + esc(t('login')) + '</div><div class="cb-csub">' + esc(s.signedIn ? t('chSaved') : t('notSigned')) + '</div></div>' +
@@ -492,7 +494,7 @@
     steps.push({ at: ['tab-settings'], enter: { tab: 'overlay' }, text: t('t_tabSettings'), until: () => U.tab === 'settings', act: { tab: 'settings' } });
     steps.push({ at: ['set-auto'], enter: { tab: 'settings' }, text: t('t_auto') });
     steps.push({ at: ['set-login'], enter: { tab: 'settings' }, text: t('t_login') });
-    steps.push({ at: ['winbtns'], enter: { tab: 'sync' }, text: t('t_tray') });
+    steps.push({ at: ['winbtns'], enter: { tab: 'sync' }, text: t('t_tray', s.closeQuits) });
     steps.push({ at: ['help'], text: t('t_help') });
     return steps;
   }
@@ -611,6 +613,7 @@
     tourBack: () => tourBack(),
     tourEnd: () => endTour(),
     minimize: () => { if (U.tour) endTour(); send('minimize'); },
+    close: () => { if (U.tour) endTour(); send('close'); },
     quit: () => send('quit'),
     sync: () => send('sync'),
     login: () => send('login'),
@@ -633,6 +636,7 @@
     intDec: () => send('setInterval', { v: S.interval - 1 }),
     intInc: () => send('setInterval', { v: S.interval + 1 }),
     setStartup: () => send('setStartup', { on: !S.startup }),
+    setCloseQuits: () => send('setCloseQuits', { on: !S.closeQuits }),
     setLang: (el) => send('setLang', { lang: el.getAttribute('data-lang') }),
     signOut: () => send('signOut')
   };

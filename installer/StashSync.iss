@@ -36,7 +36,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 RestartApplications=no
-VersionInfoProductName=StashSync Setup
+AppCopyright=Copyright (C) 2026 {#MyAppPublisher}
+VersionInfoVersion={#MyAppVersion}.0
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
+VersionInfoProductName=StashSync
+VersionInfoProductVersion={#MyAppVersion}
 VersionInfoDescription=StashSync installer
 
 [Languages]
@@ -90,20 +95,15 @@ Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{localappdata}\ArcCalc"
 Type: filesandordirs; Name: "{userappdata}\ArcCalc"
 
-[UninstallRun]
-Filename: "{sys}\reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v StashSync /f"; Flags: runhidden; RunOnceId: "RemoveStashSyncStartup"
-
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-// The window is a WebView2 page. Windows 11 has the runtime; older systems may not.
+// The window is a WebView2 page. Windows 11 has the runtime, and Windows 10 gets it with Edge.
+// Setup only checks for it and points to Microsoft's page; it downloads and runs nothing itself.
 const
   WebView2Id = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   WebView2Url = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
-
-var
-  DownloadPage: TDownloadWizardPage;
 
 function HasVersion(Root: Integer; Key: String): Boolean;
 var
@@ -112,36 +112,53 @@ begin
   Result := RegQueryStringValue(Root, Key, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0');
 end;
 
+// <Base>\<version>\msedgewebview2.exe, the runtime's own layout.
+function HasRuntimeFiles(Base: String): Boolean;
+var
+  Found: TFindRec;
+begin
+  Result := False;
+  if not FindFirst(Base + '\*', Found) then
+    Exit;
+  try
+    repeat
+      if (Found.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0) and (Found.Name <> '.') and (Found.Name <> '..')
+        and FileExists(Base + '\' + Found.Name + '\msedgewebview2.exe') then
+      begin
+        Result := True;
+        Exit;
+      end;
+    until not FindNext(Found);
+  finally
+    FindClose(Found);
+  end;
+end;
+
+// Microsoft's documented registry check, plus the runtime folders in case the registry
+// entry is missing: «not found» only when neither has it.
 function WebView2Installed: Boolean;
 begin
   Result := HasVersion(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WebView2Id)
     or HasVersion(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WebView2Id)
-    or HasVersion(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WebView2Id);
+    or HasVersion(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WebView2Id)
+    or HasRuntimeFiles(ExpandConstant('{commonpf32}\Microsoft\EdgeWebView\Application'))
+    or HasRuntimeFiles(ExpandConstant('{localappdata}\Microsoft\EdgeWebView\Application'));
 end;
 
-procedure InitializeWizard;
-begin
-  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
-end;
-
-function NextButtonClick(CurPageID: Integer): Boolean;
+procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ResultCode: Integer;
+  ErrorCode: Integer;
 begin
-  Result := True;
-  if (CurPageID <> wpReady) or WebView2Installed then
+  if (CurStep <> ssPostInstall) or WebView2Installed then
     Exit;
-  DownloadPage.Clear;
-  DownloadPage.Add(WebView2Url, 'MicrosoftEdgeWebview2Setup.exe', '');
-  DownloadPage.Show;
-  try
-    try
-      DownloadPage.Download;
-      Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    except
-      SuppressibleMsgBox('StashSync needs Microsoft Edge WebView2 Runtime. Install it from ' + WebView2Url, mbError, MB_OK, IDOK);
-    end;
-  finally
-    DownloadPage.Hide;
-  end;
+  if SuppressibleMsgBox('StashSync needs Microsoft Edge WebView2 Runtime, which is missing on this PC. Open the Microsoft download page?',
+    mbConfirmation, MB_YESNO, IDNO) = IDYES then
+    ShellExec('open', WebView2Url, '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
+end;
+
+// «Start with Windows» is a value the app writes itself; remove it with the app.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'StashSync');
 end;

@@ -8,6 +8,11 @@ use std::sync::{Mutex, OnceLock};
 
 const WM_APP: u32 = 0x8000;
 const TRAY_MSG: u32 = WM_APP + 1;
+/// Sent by a second copy of the app to the running one: show the window.
+const SHOW_MSG: u32 = WM_APP + 2;
+const NIN_BALLOONUSERCLICK: u32 = 0x0405;
+const ERROR_ALREADY_EXISTS: u32 = 183;
+const ASFW_ANY: u32 = u32::MAX;
 const WM_LBUTTONUP: u32 = 0x0202;
 const WM_LBUTTONDBLCLK: u32 = 0x0203;
 const WM_RBUTTONUP: u32 = 0x0205;
@@ -37,6 +42,8 @@ const TH32CS_SNAPPROCESS: u32 = 0x2;
 const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
 const DWMWCP_ROUND: u32 = 2;
 const MB_ICONWARNING: u32 = 0x30;
+const MB_YESNO: u32 = 0x04;
+const IDYES: i32 = 6;
 const GA_ROOT: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +51,8 @@ pub enum TrayClick {
     Left,
     Right,
     Double,
+    /// A click on our Windows notification, or the app was started again.
+    Activate,
 }
 
 static TRAY_HWND: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -124,9 +133,14 @@ pub fn work_area() -> (i32, i32, i32, i32) {
     (rect.left, rect.top, rect.right, rect.bottom)
 }
 
-/// Only the two pages the window links to.
+/// Microsoft's download page of the WebView2 Runtime.
+pub const WEBVIEW2_URL: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
+
+/// Only the pages the app links to.
 pub fn open_url(url: &str) {
-    let allowed = url == "https://arccalc.github.io" || url == "https://github.com/Arccalc/StashSync";
+    let allowed = url == "https://arccalc.github.io"
+        || url == "https://github.com/Arccalc/StashSync"
+        || url == WEBVIEW2_URL;
     if !allowed {
         return;
     }
@@ -171,6 +185,13 @@ pub fn message_box(title: &str, text: &str) {
     unsafe {
         MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_ICONWARNING);
     }
+}
+
+/// Yes / No question. True for Yes.
+pub fn ask_yes_no(title: &str, text: &str) -> bool {
+    let title = wide(title);
+    let text = wide(text);
+    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_ICONWARNING | MB_YESNO) == IDYES }
 }
 
 pub fn small_icon_size() -> u32 {
@@ -247,6 +268,35 @@ pub fn tray_add(icon: *mut c_void, tip: &str, on_click: impl Fn(TrayClick) + Sen
         TASKBAR_CREATED.store(RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()), Ordering::Relaxed);
     }
     notify(NIM_ADD, NIF_MESSAGE | NIF_ICON | NIF_TIP, None);
+}
+
+/// True for the first copy of the app in this Windows session. A later copy asks the
+/// running one to show its window and returns false; the caller then exits.
+pub fn first_instance() -> bool {
+    unsafe {
+        // Never closed: the mutex lives as long as the process.
+        CreateMutexW(std::ptr::null_mut(), 0, wide("Local\\StashSync.Window").as_ptr());
+        if GetLastError() != ERROR_ALREADY_EXISTS {
+            return true;
+        }
+        // The running copy may still be starting and have no tray window yet.
+        // Every tray window gets the message: an older version ignores it.
+        let class = wide("StashSyncTray");
+        for _ in 0..30 {
+            let mut hwnd = FindWindowExW(std::ptr::null_mut(), std::ptr::null_mut(), class.as_ptr(), std::ptr::null());
+            if !hwnd.is_null() {
+                // Lets the running copy bring its window to the front.
+                AllowSetForegroundWindow(ASFW_ANY);
+                while !hwnd.is_null() {
+                    PostMessageW(hwnd, SHOW_MSG, 0, 0);
+                    hwnd = FindWindowExW(std::ptr::null_mut(), hwnd, class.as_ptr(), std::ptr::null());
+                }
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
+    }
 }
 
 /// Right-click menu at the cursor. Returns the picked item's id, 0 when dismissed.
@@ -356,6 +406,7 @@ unsafe extern "system" fn tray_proc(hwnd: *mut c_void, msg: u32, wparam: usize, 
             WM_LBUTTONUP => Some(TrayClick::Left),
             WM_RBUTTONUP => Some(TrayClick::Right),
             WM_LBUTTONDBLCLK => Some(TrayClick::Double),
+            NIN_BALLOONUSERCLICK => Some(TrayClick::Activate),
             _ => None,
         };
         if let Some(click) = click {
@@ -363,6 +414,14 @@ unsafe extern "system" fn tray_proc(hwnd: *mut c_void, msg: u32, wparam: usize, 
                 if let Some(handler) = guard.as_ref() {
                     handler(click);
                 }
+            }
+        }
+        return 0;
+    }
+    if msg == SHOW_MSG {
+        if let Ok(guard) = tray_handler().lock() {
+            if let Some(handler) = guard.as_ref() {
+                handler(TrayClick::Activate);
             }
         }
         return 0;
@@ -488,6 +547,8 @@ extern "system" {
     ) -> *mut c_void;
     fn DestroyIcon(icon: *mut c_void) -> i32;
     fn MessageBoxW(hwnd: *mut c_void, text: *const u16, caption: *const u16, kind: u32) -> i32;
+    fn FindWindowExW(parent: *mut c_void, after: *mut c_void, class: *const u16, title: *const u16) -> *mut c_void;
+    fn AllowSetForegroundWindow(process_id: u32) -> i32;
 }
 
 #[link(name = "shell32")]
@@ -512,6 +573,8 @@ extern "system" {
     fn Process32FirstW(snapshot: *mut c_void, entry: *mut ProcessEntry) -> i32;
     fn Process32NextW(snapshot: *mut c_void, entry: *mut ProcessEntry) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
+    fn CreateMutexW(attributes: *mut c_void, initial_owner: i32, name: *const u16) -> *mut c_void;
+    fn GetLastError() -> u32;
 }
 
 #[link(name = "dwmapi")]
