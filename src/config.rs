@@ -115,9 +115,6 @@ impl HelperConfig {
             Ok(raw) => serde_json::from_str::<HelperConfig>(&raw).unwrap_or_default(),
             Err(_) => HelperConfig::default(),
         };
-        if cfg.language.is_empty() {
-            cfg.language = crate::win::system_language().to_string();
-        }
         // Old builds defaulted to a few seconds — migrate to 3 minutes.
         if cfg.poll_interval_secs < 60 {
             cfg.poll_interval_secs = DEFAULT_POLL_SECS;

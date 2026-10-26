@@ -19,7 +19,15 @@ const NIF_ICON: u32 = 0x02;
 const NIF_TIP: u32 = 0x04;
 const NIF_INFO: u32 = 0x10;
 const NIIF_NOSOUND: u32 = 0x10;
-const HWND_MESSAGE: isize = -3;
+const WS_POPUP: u32 = 0x8000_0000;
+const WS_EX_TOOLWINDOW: u32 = 0x80;
+const MF_STRING: u32 = 0;
+const TPM_RIGHTBUTTON: u32 = 0x0002;
+const TPM_RIGHTALIGN: u32 = 0x0008;
+const TPM_BOTTOMALIGN: u32 = 0x0020;
+const TPM_RETURNCMD: u32 = 0x0100;
+const WM_NULL: u32 = 0;
+const APP_MODE_FORCE_DARK: i32 = 2;
 const SM_CXSCREEN: i32 = 0;
 const SM_CYSCREEN: i32 = 1;
 const SM_CXSMICON: i32 = 49;
@@ -29,6 +37,7 @@ const TH32CS_SNAPPROCESS: u32 = 0x2;
 const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
 const DWMWCP_ROUND: u32 = 2;
 const MB_ICONWARNING: u32 = 0x30;
+const GA_ROOT: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrayClick {
@@ -61,17 +70,6 @@ fn fill(dest: &mut [u16], text: &str) {
     let chars: Vec<u16> = text.encode_utf16().take(dest.len() - 1).collect();
     dest[..chars.len()].copy_from_slice(&chars);
     dest[chars.len()] = 0;
-}
-
-/// en, ru, de or fr from the Windows display language.
-pub fn system_language() -> &'static str {
-    let lang = unsafe { GetUserDefaultUILanguage() } & 0x3FF;
-    match lang {
-        0x19 => "ru",
-        0x07 => "de",
-        0x0C => "fr",
-        _ => "en",
-    }
 }
 
 /// Steam writes the signed-in account here while it runs.
@@ -159,6 +157,14 @@ pub fn round_corners(hwnd: isize) {
     }
 }
 
+/// True while `hwnd` (or one of its child windows, such as WebView2's) is the foreground window.
+pub fn is_foreground(hwnd: isize) -> bool {
+    unsafe {
+        let fg = GetForegroundWindow();
+        !fg.is_null() && GetAncestor(fg, GA_ROOT) as isize == hwnd
+    }
+}
+
 pub fn message_box(title: &str, text: &str) {
     let title = wide(title);
     let text = wide(text);
@@ -200,6 +206,7 @@ pub fn tray_add(icon: *mut c_void, tip: &str, on_click: impl Fn(TrayClick) + Sen
         *guard = tip.to_string();
     }
     TRAY_ICON.store(icon, Ordering::Relaxed);
+    dark_menus();
     unsafe {
         let class = wide("StashSyncTray");
         let info = WndClass {
@@ -217,16 +224,18 @@ pub fn tray_add(icon: *mut c_void, tip: &str, on_click: impl Fn(TrayClick) + Sen
             icon_sm: std::ptr::null_mut(),
         };
         RegisterClassExW(&info);
+        // A hidden top-level window, not a message-only one: those miss the
+        // TaskbarCreated broadcast and cannot own the tray menu.
         let hwnd = CreateWindowExW(
-            0,
+            WS_EX_TOOLWINDOW,
             class.as_ptr(),
             class.as_ptr(),
+            WS_POPUP,
             0,
             0,
             0,
             0,
-            0,
-            HWND_MESSAGE as *mut c_void,
+            std::ptr::null_mut(),
             std::ptr::null_mut(),
             GetModuleHandleW(std::ptr::null()),
             std::ptr::null_mut(),
@@ -238,6 +247,61 @@ pub fn tray_add(icon: *mut c_void, tip: &str, on_click: impl Fn(TrayClick) + Sen
         TASKBAR_CREATED.store(RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()), Ordering::Relaxed);
     }
     notify(NIM_ADD, NIF_MESSAGE | NIF_ICON | NIF_TIP, None);
+}
+
+/// Right-click menu at the cursor. Returns the picked item's id, 0 when dismissed.
+pub fn tray_menu(items: &[(u32, &str)]) -> u32 {
+    let hwnd = TRAY_HWND.load(Ordering::Relaxed);
+    if hwnd.is_null() {
+        return 0;
+    }
+    unsafe {
+        let menu = CreatePopupMenu();
+        if menu.is_null() {
+            return 0;
+        }
+        for (id, label) in items {
+            let text = wide(label);
+            AppendMenuW(menu, MF_STRING, *id as usize, text.as_ptr());
+        }
+        let mut cursor = WinPoint { x: 0, y: 0 };
+        GetCursorPos(&mut cursor);
+        // Without this the menu stays open after a click elsewhere.
+        SetForegroundWindow(hwnd);
+        let picked = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RIGHTALIGN,
+            cursor.x,
+            cursor.y,
+            0,
+            hwnd,
+            std::ptr::null(),
+        );
+        PostMessageW(hwnd, WM_NULL, 0, 0);
+        DestroyMenu(menu);
+        picked.max(0) as u32
+    }
+}
+
+/// Dark context menus to match the window. uxtheme's SetPreferredAppMode (ordinal 135)
+/// is undocumented but stable since Windows 10 1903; older systems keep light menus.
+fn dark_menus() {
+    unsafe {
+        let lib = LoadLibraryW(wide("uxtheme.dll").as_ptr());
+        if lib.is_null() {
+            return;
+        }
+        let set_mode = GetProcAddress(lib, 135 as *const u8);
+        if !set_mode.is_null() {
+            let set_mode: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(set_mode);
+            set_mode(APP_MODE_FORCE_DARK);
+        }
+        let flush = GetProcAddress(lib, 136 as *const u8);
+        if !flush.is_null() {
+            let flush: unsafe extern "system" fn() = std::mem::transmute(flush);
+            flush();
+        }
+    }
 }
 
 /// New status dot or tooltip.
@@ -362,6 +426,12 @@ struct ProcessEntry {
 }
 
 #[repr(C)]
+struct WinPoint {
+    x: i32,
+    y: i32,
+}
+
+#[repr(C)]
 struct WinRect {
     left: i32,
     top: i32,
@@ -371,6 +441,23 @@ struct WinRect {
 
 #[link(name = "user32")]
 extern "system" {
+    fn GetForegroundWindow() -> *mut c_void;
+    fn GetAncestor(hwnd: *mut c_void, flags: u32) -> *mut c_void;
+    fn SetForegroundWindow(hwnd: *mut c_void) -> i32;
+    fn GetCursorPos(point: *mut WinPoint) -> i32;
+    fn CreatePopupMenu() -> *mut c_void;
+    fn AppendMenuW(menu: *mut c_void, flags: u32, id: usize, text: *const u16) -> i32;
+    fn TrackPopupMenu(
+        menu: *mut c_void,
+        flags: u32,
+        x: i32,
+        y: i32,
+        reserved: i32,
+        hwnd: *mut c_void,
+        rect: *const WinRect,
+    ) -> i32;
+    fn DestroyMenu(menu: *mut c_void) -> i32;
+    fn PostMessageW(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> i32;
     fn RegisterClassExW(class: *const WndClass) -> u16;
     fn CreateWindowExW(
         ex_style: u32,
@@ -419,7 +506,8 @@ extern "system" {
 #[link(name = "kernel32")]
 extern "system" {
     fn GetModuleHandleW(name: *const u16) -> *mut c_void;
-    fn GetUserDefaultUILanguage() -> u16;
+    fn LoadLibraryW(name: *const u16) -> *mut c_void;
+    fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
     fn CreateToolhelp32Snapshot(flags: u32, process: u32) -> *mut c_void;
     fn Process32FirstW(snapshot: *mut c_void, entry: *mut ProcessEntry) -> i32;
     fn Process32NextW(snapshot: *mut c_void, entry: *mut ProcessEntry) -> i32;

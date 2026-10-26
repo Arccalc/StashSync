@@ -71,6 +71,7 @@ struct App {
     /// The tray flyout page is made on the first tray click; most sessions never open it.
     fly: Option<Page>,
     fly_closed_at: Instant,
+    fly_shown_at: Instant,
     fly_h: f64,
     context: WebContext,
     proxy: EventLoopProxy<UserEvent>,
@@ -152,6 +153,7 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig) -> ! {
         },
         fly: None,
         fly_closed_at: Instant::now() - Duration::from_secs(5),
+        fly_shown_at: Instant::now(),
         fly_h: 260.0,
         context,
         proxy,
@@ -182,11 +184,18 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig) -> ! {
                     *control_flow = ControlFlow::Exit;
                 }
             }
-            Event::UserEvent(UserEvent::Tray(click)) => app.on_tray(click, target),
+            Event::UserEvent(UserEvent::Tray(click)) => {
+                if app.on_tray(click, target) {
+                    app.quit();
+                    *control_flow = ControlFlow::Exit;
+                }
+            }
             Event::WindowEvent { window_id, event, .. } => {
                 if app.fly.as_ref().is_some_and(|fly| fly.window.id() == window_id) {
+                    // Focus also "leaves" when WebView2 takes it into its own child window;
+                    // only another window coming to the front closes the flyout.
                     if let WindowEvent::Focused(false) = event {
-                        app.hide_fly();
+                        app.hide_fly_if_away();
                     }
                 } else if window_id == app.main.window.id() {
                     if let WindowEvent::CloseRequested = event {
@@ -296,6 +305,16 @@ fn tray_icon(dot: &str) -> *mut std::ffi::c_void {
     win::make_icon(img.as_raw(), side)
 }
 
+/// Right-click tray menu: open the window, quit.
+fn tray_menu_text(lang: &str) -> [&'static str; 2] {
+    match lang {
+        "ru" => ["Открыть StashSync", "Выйти"],
+        "de" => ["StashSync öffnen", "Beenden"],
+        "fr" => ["Ouvrir StashSync", "Quitter"],
+        _ => ["Open StashSync", "Quit"],
+    }
+}
+
 fn minimized_text(lang: &str) -> &'static str {
     match lang {
         "ru" => "StashSync свёрнут. Склад продолжает обновляться.",
@@ -315,6 +334,10 @@ impl App {
             self.game_on = !self.signed_in && win::process_running(GAME_EXE);
         }
 
+        // Focused(false) can arrive while Windows still reports the flyout in front; recheck here.
+        if self.fly_shown_at.elapsed() > Duration::from_millis(400) {
+            self.hide_fly_if_away();
+        }
         if self.hotkey.take_press() {
             self.set_shown(!self.config.overlay_shown);
         }
@@ -569,7 +592,14 @@ impl App {
             fly.window.set_focus();
             fly.last_state.clear();
         }
+        self.fly_shown_at = Instant::now();
         self.push(Target::Fly);
+    }
+
+    fn hide_fly_if_away(&mut self) {
+        if self.fly.as_ref().is_some_and(|fly| fly.window.is_visible() && !win::is_foreground(fly.window.hwnd())) {
+            self.hide_fly();
+        }
     }
 
     fn hide_fly(&mut self) {
@@ -599,10 +629,20 @@ impl App {
         fly.window.set_outer_position(PhysicalPosition::new(x, y));
     }
 
-    fn on_tray(&mut self, click: TrayClick, target: &EventLoopWindowTarget<UserEvent>) {
+    /// Returns true when the app should quit.
+    fn on_tray(&mut self, click: TrayClick, target: &EventLoopWindowTarget<UserEvent>) -> bool {
         match click {
             TrayClick::Double => self.show_main(),
-            TrayClick::Left | TrayClick::Right => {
+            TrayClick::Right => {
+                self.hide_fly();
+                let [open, quit] = tray_menu_text(&self.config.language);
+                match win::tray_menu(&[(1, open), (2, quit)]) {
+                    1 => self.show_main(),
+                    2 => return true,
+                    _ => {}
+                }
+            }
+            TrayClick::Left => {
                 if self.fly.as_ref().is_some_and(|fly| fly.window.is_visible()) {
                     self.hide_fly();
                 } else if self.fly_closed_at.elapsed() > Duration::from_millis(350) {
@@ -611,6 +651,7 @@ impl App {
                 }
             }
         }
+        false
     }
 
     fn quit(&mut self) {
@@ -778,6 +819,10 @@ impl App {
         // Answer at once so a switch never waits for the next tick.
         self.push(Target::Main);
         self.push(Target::Fly);
+        // Same for the in-game overlay: a slider drag repaints it on every step, not 4 times a second.
+        if cmd.starts_with("ov") {
+            self.sync_overlay();
+        }
         false
     }
 }

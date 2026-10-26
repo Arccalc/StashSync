@@ -273,7 +273,7 @@ fn paint(
         let stride = width * 4;
         if list {
             let radius = 6.0 * scale;
-            fill_plate(bits, stride, width, height, 0, 0, width, height, radius, 0.55, false, opacity);
+            fill_plate(bits, stride, width, height, 0, 0, width, height, radius, 1.0, false, opacity);
             paint_list(bits, stride, width, tiles, scale, opacity);
             paint_list_text(bits, stride, width, height, screen, tiles, scale, opacity);
         } else {
@@ -353,7 +353,7 @@ fn paint_tiles(
         let (col, row) = slot(index, vertical);
         let x = col * step;
         let y = row * step;
-        fill_plate(bits, stride, width, height, x, y, tile, tile, 8.0 * scale, 0.8, true, opacity);
+        fill_plate(bits, stride, width, height, x, y, tile, tile, 8.0 * scale, 1.0, true, opacity);
         blit_icon(bits, stride, width, item, x + inset, y + inset, icon, opacity);
     }
 }

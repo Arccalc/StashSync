@@ -119,6 +119,15 @@
       ARC(26, 18) +
       '<div class="cb-u" style="font-weight: 700; font-size: 14px; letter-spacing: -0.01em">StashSync</div>' +
       '<div style="flex: 1"></div>' +
+      // Ko-fi: the cup fills with the four ARC colours and steams in them on hover.
+      '<button class="cb-kf" data-act="open" data-url="https://ko-fi.com/U7U21PU1TF" aria-label="' + esc(t('kofi')) + '">' +
+      // The viewBox centres the cup body (not the steam above it) like the other title bar icons.
+      '<svg width="24" height="24" viewBox="1 3.5 22 22" aria-hidden="true"><defs><clipPath id="cb-kfc"><path d="M5 10h11v4.5a4.5 4.5 0 0 1-4.5 4.5h-2A4.5 4.5 0 0 1 5 14.5z"></path></clipPath></defs>' +
+      '<g clip-path="url(#cb-kfc)"><g class="cb-kf-fill"><g transform="translate(10.5 14.5) skewX(-20) translate(-10.5 -14.5)">' +
+      '<rect x="0" y="9" width="7.75" height="11" fill="#FF6A55"></rect><rect x="7.75" y="9" width="2.85" height="11" fill="#F5BE2E"></rect><rect x="10.5" y="9" width="2.85" height="11" fill="#46C76A"></rect><rect x="13.25" y="9" width="8" height="11" fill="#45D3E6"></rect></g></g></g>' +
+      '<path d="M4 9h13v5.5a5.5 5.5 0 0 1-5.5 5.5h-2A5.5 5.5 0 0 1 4 14.5zM17 10.5h1.2a2.8 2.8 0 0 1 0 5.6H17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path>' +
+      '<g class="cb-kf-st"><path class="s1" d="M6.5 7c-1-1.1 1-1.9 0-3.2" stroke="#FF6A55"></path><path class="s2" d="M9.2 7c-1-1.1 1-1.9 0-3.2" stroke="#F5BE2E"></path><path class="s3" d="M11.9 7c-1-1.1 1-1.9 0-3.2" stroke="#46C76A"></path><path class="s4" d="M14.6 7c-1-1.1 1-1.9 0-3.2" stroke="#45D3E6"></path></g></svg>' +
+      '<span class="cb-kf-tip">' + esc(t('kofi')) + '</span></button>' +
       '<button class="cb-wbtn" data-tour="help" aria-label="' + esc(t('help')) + '" title="' + esc(t('help')) + '" data-act="tour"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"></circle><path d="M6.2 6.3a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path><circle cx="8" cy="11.6" r=".9" fill="currentColor"></circle></svg></button>' +
       '<span data-tour="winbtns" style="display: flex; gap: 10px">' +
       '<button class="cb-wbtn" aria-label="' + esc(t('minimize')) + '" title="' + esc(t('minimize')) + '" data-act="minimize"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg></button>' +
@@ -166,12 +175,21 @@
         (hasAction ? '<button class="cb-btn cb-fade" style="height: 36px; margin-top: 10px; font-size: 13px" data-act="' + (isWarn ? 'recheck' : 'login') + '">' + esc(isWarn ? t('rGameClosed') : t('signIn')) + '</button>' : '') +
         '</div></div>';
     }).join('');
-    return '<div class="cb-fade" data-key="route" data-tour="route" style="padding-top: 22px">' +
+    return '<div class="cb-fade" data-key="route" style="padding-top: 22px">' +
       '<div class="cb-u" style="font-weight: 700; font-size: 18px; letter-spacing: -0.02em">' + esc(t('rTitle')) + '</div>' +
       '<div style="font-size: 13px; color: #A9A3C7; margin-top: 6px">' + esc(t('rSub')) + '</div>' +
-      '<div style="position: relative; margin-top: 18px; padding: 8px 16px; border-radius: 14px; background: #17142E"><div style="position: relative">' +
+      '<div data-tour="route" style="position: relative; margin-top: 18px; padding: 8px 16px; border-radius: 14px; background: #17142E"><div style="position: relative">' +
       '<div class="cb-line"><div class="cb-fill" style="height: ' + (Math.min(setup, 3) / 3 * 100) + '%"></div></div>' + rows +
-      '</div></div></div>';
+      '</div></div>' +
+      // What the user gets once signed in; fills the free space under the route.
+      '<div style="margin-top: 14px; font-size: 12px; font-weight: 700; color: #A9A3C7; letter-spacing: .04em; text-transform: uppercase">' + esc(t('aTitle')) + '</div>' +
+      [[SYNC_PATH, t('a1'), t('a1s', s.interval)], ['', t('a2'), t('a2s', s.ov.key)]].map((a) =>
+        '<div style="display: flex; gap: 12px; align-items: flex-start; padding: 7px 0">' +
+        '<span style="flex: none; width: 36px; height: 36px; border-radius: 10px; background: #262150; display: flex; align-items: center; justify-content: center; color: #45D3E6">' +
+        (a[0] ? '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="' + a[0] + '" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>'
+          : '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect><path d="M7 17.5h6M6 8h2.5M6 10.5h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>') +
+        '</span><div><div style="font-size: 14px; font-weight: 600">' + esc(a[1]) + '</div><div style="font-size: 12px; color: #A9A3C7; margin-top: 2px; line-height: 1.45">' + esc(a[2]) + '</div></div></div>').join('') +
+      '</div>';
   }
 
   function heroHtml() {
@@ -311,15 +329,16 @@
         return '<span data-key="ov-' + esc(it.name) + '" class="' + cls + '" style="display: flex; align-items: center; gap: ' + f2(6 * kk) + '; height: ' + f2(28 * kk) + '; padding: 0 ' + f2(6 * kk) + '; font-size: ' + f2(Math.max(4, 13 * kk)) + '; color: #F2EEE6; text-shadow: 0 1px 2px #000; animation-delay: ' + (i * 0.04) + 's">' +
           icon + '<span style="flex: 1; white-space: nowrap; overflow: hidden">' + esc(it.label) + '</span><span class="cb-tnum" style="font-weight: 700">' + left + '</span></span>';
       }
-      return '<span data-key="ov-' + esc(it.name) + '" class="' + cls + '" style="position: relative; width: ' + f2(g.tile) + '; height: ' + f2(g.tile) + '; flex: none; border-radius: ' + f2(8 * kk) + '; background: rgba(21,18,43,.8); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; animation-delay: ' + (i * 0.04) + 's">' +
+      return '<span data-key="ov-' + esc(it.name) + '" class="' + cls + '" style="position: relative; width: ' + f2(g.tile) + '; height: ' + f2(g.tile) + '; flex: none; border-radius: ' + f2(8 * kk) + '; background: #15122B; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; animation-delay: ' + (i * 0.04) + 's">' +
         icon + '<span class="cb-tnum" style="position: absolute; right: 8%; bottom: 4%; font-weight: 700; line-height: 1; font-size: ' + f2(Math.max(4, 13 * kk)) + '; text-shadow: 0 1px 2px #000">' + left + '</span></span>';
     }).join('');
-    const box = 'left: ' + g.x.toFixed(1) + 'px; top: ' + g.y.toFixed(1) + 'px; opacity: ' + (o.shown ? o.opacity / 100 : 0.35) + '; display: flex; gap: ' + f2(g.gap) + '; ' +
-      (o.list ? 'flex-direction: column; gap: 0; width: ' + f2(280 * kk) + '; border-radius: ' + f2(6 * kk) + '; background: rgba(21,18,43,.55);'
+    const box = 'left: ' + g.x.toFixed(1) + 'px; top: ' + g.y.toFixed(1) + 'px; opacity: ' + o.opacity / 100 + '; display: flex; gap: ' + f2(g.gap) + '; ' +
+      (o.list ? 'flex-direction: column; gap: 0; width: ' + f2(280 * kk) + '; border-radius: ' + f2(6 * kk) + '; background: #15122B;'
         : o.vertical ? 'flex-direction: column; flex-wrap: wrap; height: ' + f2(g.tile * g.per + g.gap * (g.per - 1)) + ';' : 'flex-wrap: wrap; width: ' + f2(g.tile * g.per + g.gap * (g.per - 1)) + ';');
     const corners = [['tl', t('cTL'), 'left: 4px; top: 4px'], ['tr', t('cTR'), 'right: 4px; top: 4px'], ['bl', t('cBL'), 'left: 4px; bottom: 4px'], ['br', t('cBR'), 'right: 4px; bottom: 4px']];
     const seg = (on, act, label, disabled) => '<button data-on="' + on + '" data-act="' + act + '"' + (disabled ? ' disabled' : '') + '>' + esc(label) + '</button>';
-    return '<div class="cb-fade" data-key="overlay" style="padding-top: 20px">' +
+    // Title, preview and hint stay put; only the settings below scroll, so the preview stays in sight.
+    const head = '<div class="cb-fade" data-key="overlay" style="flex: none; padding: 20px 20px 0">' +
       '<div style="display: flex; align-items: center; gap: 12px"><div style="flex: 1">' +
       '<div class="cb-u" style="font-weight: 700; font-size: 18px; letter-spacing: -0.02em">' + esc(t('ovTitle')) + '</div>' +
       '<div style="font-size: 13px; color: #A9A3C7; margin-top: 4px; line-height: 1.4">' + esc(t('ovSub')) + '</div></div>' +
@@ -328,7 +347,8 @@
       (g.items.length ? '<div class="' + (U.drag ? 'cb-ov' : 'cb-ov cb-move') + '" data-ovbox="1" style="position: absolute; ' + box + '">' + tiles + '</div>'
         : '<div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #F2EEE6; text-shadow: 0 1px 3px #000">' + esc(t('gEmpty')) + '</div>') +
       '</div>' +
-      '<div style="margin-top: 8px; font-size: 12px; color: #A9A3C7; line-height: 1.45">' + esc(t('ovHint', o.screenW, o.screenH)) + '</div>' +
+      '<div style="margin-top: 8px; font-size: 12px; color: #A9A3C7; line-height: 1.45">' + esc(t('ovHint', o.screenW, o.screenH)) + '</div></div>';
+    const settings = '<div class="cb-fade" data-key="overlay-set">' +
       '<div data-tour="ov-look"><div class="cb-card" style="margin-top: 16px">' +
       '<div class="cb-crow"><span class="cb-clab">' + esc(t('corner')) + '</span><div style="display: flex; gap: 6px">' +
       corners.map((c) => '<button class="cb-corner" data-on="' + (o.corner === c[0]) + '" aria-label="' + esc(c[1]) + '" title="' + esc(c[1]) + '" data-act="ovCorner" data-c="' + c[0] + '"><span style="' + c[2] + '"></span></button>').join('') + '</div></div>' +
@@ -336,7 +356,7 @@
       '<div class="cb-crow cb-cdiv"><span class="cb-clab">' + esc(t('row')) + '</span><div class="cb-seg" style="width: 200px">' + seg(!o.vertical, 'ovAcross', t('across'), o.list) + seg(o.vertical, 'ovDown', t('down'), o.list) + '</div></div>' +
       '</div><div class="cb-card">' +
       '<div class="cb-cslide"><div class="cb-cline"><label for="cb-size" class="cb-clab">' + esc(t('size')) + '</label><span class="cb-tnum" style="font-size: 13px; font-weight: 600; color: #C9C3E6">' + o.size + '%</span></div><input id="cb-size" class="cb-range" type="range" min="50" max="160" step="5" value="' + o.size + '" data-input="ovSize" style="--p: ' + sizeP + '%"></div>' +
-      '<div class="cb-cslide cb-cdiv"><div class="cb-cline"><label for="cb-op" class="cb-clab">' + esc(t('opacity')) + '</label><span class="cb-tnum" style="font-size: 13px; font-weight: 600; color: #C9C3E6">' + o.opacity + '%</span></div><input id="cb-op" class="cb-range" type="range" min="20" max="100" step="5" value="' + o.opacity + '" data-input="ovOpacity" style="--p: ' + opP + '%"></div>' +
+      '<div class="cb-cslide cb-cdiv"><div class="cb-cline"><label for="cb-op" class="cb-clab">' + esc(t('opacity')) + '</label><span class="cb-tnum" style="font-size: 13px; font-weight: 600; color: #C9C3E6">' + o.opacity + '%</span></div><input id="cb-op" class="cb-range" type="range" min="20" max="100" step="1" value="' + o.opacity + '" data-input="ovOpacity" style="--p: ' + opP + '%"></div>' +
       '</div></div>' +
       '<div class="cb-card" data-tour="ov-key">' +
       '<div class="cb-crow"><div style="min-width: 0"><div class="cb-clab">' + esc(t('key')) + '</div><div class="cb-csub">' + esc(t('keySub')) + '</div></div><button class="cb-key" data-wait="' + U.keyWait + '" aria-label="' + esc(t('key') + ': ' + o.key) + '" data-act="askKey">' + esc(U.keyWait ? '…' : o.key) + '</button></div>' +
@@ -344,6 +364,7 @@
       '</div>' +
       '<button class="cb-ghost" data-act="ovReset" style="margin-top: 16px">' + esc(t('reset')) + '</button>' +
       '</div>';
+    return [head, settings];
   }
 
   function settingsHtml() {
@@ -380,8 +401,9 @@
   }
 
   function mainHtml() {
-    const body = U.tab === 'overlay' ? overlayHtml() : U.tab === 'settings' ? settingsHtml() : S.signedIn ? heroHtml() : routeHtml();
-    return titlebar() +
+    const [fixed, body] = U.tab === 'overlay' ? overlayHtml() : ['', U.tab === 'settings' ? settingsHtml() : S.signedIn ? heroHtml() : routeHtml()];
+    // The fixed slot is always there, so the scroller and the tab bar keep their nodes across tabs.
+    return titlebar() + '<div style="flex: none">' + fixed + '</div>' +
       '<div class="cb-scroll" style="flex: 1; min-height: 0; padding: 0 10px 0 20px">' + body + '</div>' +
       navHtml() + tourHtml();
   }
@@ -394,19 +416,58 @@
     const timer = ready && s.auto && idle && !s.failed && !nosite ? t('autoIn', c.txt) : '';
     const changes = s.changes == null ? '' : s.changes ? t('changesN', s.changes) : t('noChanges');
     const text = !ready ? t('flyLogin') : syncing ? t('subReading') : s.failed ? t('subFailed') : nosite && s.lastSync ? t('flyNowhere')
-      : s.lastSync ? t('updatedAt', hhmm(s.lastSync)) + changes : t('subNever');
-    const label = !ready ? t('openAndLogin') : syncing ? t('updating') : s.failed ? t('retryNow') : t('updateNow');
-    return '<div id="fly" style="position: relative; background: #1E1A3A; overflow: hidden">' +
+      : s.lastSync ? t('updatedAt', hhmm(s.lastSync)) : t('subNever');
+    // The change count goes to the second line, next to the timer, so the first line stays short.
+    const plain = ready && !syncing && !s.failed && !nosite && s.lastSync;
+    const sub = [plain ? changes.replace(/^ · /, '') : '', timer].filter(Boolean).join(' · ');
+    const label = s.failed ? t('retryNow') : t('updateNow');
+    // Ring = countdown to the next auto update; a click updates now (same as the main window).
+    const Cm = 2 * Math.PI * 21, bad = ready && idle && (s.failed || nosite);
+    const ringColor = s.failed ? ERR : nosite ? WARN : '#45D3E6';
+    const ring = !ready ? '' : '<button class="cb-mini cb-mini-s" data-act="sync"' + (idle ? '' : ' disabled') + ' aria-label="' + esc(label) + '" title="' + esc(label) + '" style="color: ' + ringColor + '">' +
+      '<svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true" style="position: absolute; inset: 0; transform: rotate(-90deg)"><circle cx="24" cy="24" r="21" fill="none" stroke="' + (bad ? ringColor : '#2F2A55') + '" stroke-width="3"></circle>' +
+      (timer ? '<circle class="cb-prog" cx="24" cy="24" r="21" fill="none" stroke="#45D3E6" stroke-width="3" stroke-linecap="round" style="stroke-dasharray: ' + (Cm * c.frac).toFixed(1) + ' ' + Cm.toFixed(1) + '"></circle>' : '') + '</svg>' +
+      (bad ? '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 5.5v5.5M10 14.3v.1" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>'
+        : '<svg class="' + (syncing ? 'cb-spin' : '') + '" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="' + SYNC_PATH + '" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>') +
+      '</button>';
+    // Goal progress at a glance, the same numbers as the main window: % on the status row,
+    // the coloured line right under it (in place of the divider).
+    let side = '', line = '<div style="margin: 14px 16px 0; height: 1px; background: #2A2550"></div>';
+    if (ready && G.items.length) {
+      let have = 0, need = 0, uY = 0, uR = 0, left = 0;
+      goalRows().forEach((r) => {
+        left += r.it.left;
+        if (!G.legacy) { have += Math.min(r.it.have, r.it.need); need += r.it.need; }
+        if (r.rank === 1) uY += r.it.left; else if (r.rank === 0) uR += r.it.left;
+      });
+      const pct = !need ? 0 : have >= need ? 100 : Math.min(99, Math.round(have / need * 100));
+      side = '<div style="flex: none; text-align: right" title="' + esc(t('gTitle')) + '">' +
+        (G.legacy ? '' : '<div class="cb-u cb-tnum" style="font-size: 20px; font-weight: 700; line-height: 1.1">' + pct + '%</div>') +
+        '<div class="cb-tnum" style="font-size: 12px; color: #A9A3C7; margin-top: 2px; white-space: nowrap">' + esc(t('leftShort', left)) + '</div></div>';
+      if (!G.legacy) {
+        line = '<div class="cb-bar cb-bar-line" aria-hidden="true"><span class="cb-bar-seg" style="flex-grow: ' + have + '; background: ' + OK + '"></span><span class="cb-bar-seg" style="flex-grow: ' + uY + '; background: ' + WARN + '"></span><span class="cb-bar-seg" style="flex-grow: ' + uR + '; background: ' + ERR + '"></span></div>';
+      }
+    }
+    const exit = '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v6.5M6 5.8a6 6 0 1 0 8 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>';
+    // flex: none, or the flex parent squeezes it to the current window height and the window never grows.
+    return '<div id="fly" style="position: relative; flex: none; background: #1E1A3A; overflow: hidden">' +
       (syncing ? '<div class="cb-sweep"></div>' : '') +
-      '<div style="padding: 16px 16px 0; display: flex; align-items: center; gap: 8px"><span class="cb-pill ' + st[0] + '"><span class="cb-dot"></span>' + esc(st[1]) + '</span><div style="flex: 1"></div>' +
-      '<span class="cb-tnum" style="font-size: 12px; color: #A9A3C7; white-space: nowrap">' + esc(timer) + '</span></div>' +
-      '<div style="padding: 12px 16px 0; font-size: 13px; color: #C9C3E6; line-height: 1.45">' + esc(text) + '</div>' +
-      '<div style="padding: 14px 16px 0"><button class="cb-btn" style="width: 100%; height: 42px" data-act="' + (ready ? 'sync' : 'openWindow') + '"' + (ready && !idle ? ' disabled' : '') + '>' + esc(label) + '</button></div>' +
-      '<div style="display: flex; align-items: center; gap: 12px; margin: 12px 16px 0; padding-top: 12px; border-top: 1px solid #2A2550">' +
-      '<span style="flex: 1; font-size: 14px">' + esc(t('ovTitle')) + ' <span style="margin-left: 4px; font-size: 12px; font-weight: 700; color: #A9A3C7">' + esc(s.ov.key) + '</span></span>' + sw(s.ov.shown, 'ovShown', t('ovTitle')) + '</div>' +
-      '<div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px 14px; font-size: 13px">' +
-      (s.windowHidden ? '<a href="#" data-act="openWindow">' + esc(t('openWindow')) + '</a>' : '') +
-      '<span style="flex: 1"></span><a href="#" style="color: #A9A3C7" data-act="quit">' + esc(t('quitApp')) + '</a></div></div>';
+      '<div style="height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; border-bottom: 1px solid #2A2550">' + ARC(22, 16) +
+      '<span class="cb-u" style="font-weight: 700; font-size: 13px">StashSync</span><span style="flex: 1"></span>' +
+      '<span class="cb-pill cb-pill-s ' + st[0] + '"><span class="cb-dot"></span>' + esc(st[1]) + '</span></div>' +
+      '<div style="padding: 14px 16px 0; display: flex; align-items: center; gap: 12px">' + ring +
+      '<div style="flex: 1; min-width: 0"><div style="font-size: 14px; font-weight: 600; line-height: 1.35">' + esc(text) + '</div>' +
+      (sub ? '<div class="cb-tnum" style="font-size: 12px; color: #A9A3C7; margin-top: 3px">' + esc(sub) + '</div>' : '') + '</div>' + side + '</div>' +
+      (!ready ? '<div style="padding: 14px 16px 0"><button class="cb-btn" style="width: 100%; height: 42px" data-act="openWindow">' + esc(t('openAndLogin')) + '</button></div>' : '') +
+      line +
+      '<div style="display: flex; align-items: center; gap: 10px; margin: 0 16px; padding: 12px 0; border-bottom: 1px solid #2A2550">' +
+      '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" style="flex: none; color: #A9A3C7"><rect x="2.5" y="4" width="15" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"></rect><path d="M7 17.5h6M6 8h2.5M6 10.5h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>' +
+      '<span style="flex: 1; font-size: 14px">' + esc(t('ovTitle')) + '</span><span class="cb-fkey">' + esc(s.ov.key) + '</span>' + sw(s.ov.shown, 'ovShown', t('ovTitle')) + '</div>' +
+      '<div style="display: flex; align-items: center; gap: 4px; padding: 6px 8px 8px">' +
+      // Before sign-in the primary button above already opens the window.
+      (!ready ? '<span style="flex: 1; height: 44px"></span>' : '<button class="cb-fopen" data-act="openWindow"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" style="color: #45D3E6"><path d="M8.5 3.5H5A1.5 1.5 0 0 0 3.5 5v10A1.5 1.5 0 0 0 5 16.5h10a1.5 1.5 0 0 0 1.5-1.5v-3.5M11.5 3.5h5v5M16.5 3.5L10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>' + esc(t('openApp')) +
+      '<svg class="cb-chevr" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>') +
+      '<button class="cb-fquit" data-act="quit" title="' + esc(t('quitApp')) + '">' + exit + esc(t('quitShort')) + '</button></div></div>';
   }
 
   // ---------- tour (same model as the site: ring + dim + card, hybrid steps) ----------
