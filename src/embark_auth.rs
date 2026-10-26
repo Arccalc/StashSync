@@ -88,6 +88,27 @@ pub fn invalidate() {
     }
 }
 
+/// True while this computer holds an Embark sign-in that can still be used or refreshed.
+pub fn has_session() -> bool {
+    if cached_token().is_some() {
+        return true;
+    }
+    load_session().is_some_and(|session| {
+        session.refresh_token.is_some()
+            || (!session.access_token.is_empty() && session.refresh_unix > unix_now())
+    })
+}
+
+/// «Sign out»: forget the token in memory and delete the saved session.
+pub fn sign_out() {
+    if let Ok(mut guard) = cache().lock() {
+        guard.token = None;
+    }
+    if let Ok(path) = session_path() {
+        let _ = fs::remove_file(path);
+    }
+}
+
 pub fn cached_token() -> Option<String> {
     let guard = cache().lock().ok()?;
     let token = guard.token.as_ref()?;

@@ -16,21 +16,17 @@ pub enum ConnState {
     Error,
 }
 
+/// Wall clock in milliseconds, for times the window counts down to.
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Manual sync always runs. The interval runs only while auto sync is on.
 pub fn due(force: bool, auto: bool, elapsed_ms: u64, interval_ms: u64) -> bool {
     force || (auto && elapsed_ms >= interval_ms)
-}
-
-impl ConnState {
-    pub fn label(self) -> &'static str {
-        match self {
-            ConnState::Idle => "Idle",
-            ConnState::Working => "Working",
-            ConnState::Ok => "OK",
-            ConnState::Warn => "Warn",
-            ConnState::Error => "Error",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +45,10 @@ pub struct StatusSnapshot {
     pub poll_interval_secs: u64,
     pub ws_clients: u64,
     pub prepared: bool,
+    /// Calculator items that changed in the last sync. `None` until two syncs can be compared.
+    pub changes: Option<u64>,
+    /// Last time the stash reached an open calculator tab.
+    pub last_push: Option<DateTime<Local>>,
 }
 
 pub struct SharedState {
@@ -58,6 +58,14 @@ pub struct SharedState {
     pub prepare_requested: AtomicBool,
     pub prepared: AtomicBool,
     pub shutdown: AtomicBool,
+    /// Wall clock (ms) of the next automatic poll. 0 while auto sync is off.
+    pub next_poll_ms: AtomicU64,
+    /// Wall clock (ms) until which the window shows «done» after a sync.
+    pub done_until_ms: AtomicU64,
+    /// Set by «Sign out». No automatic Steam sign-in until the user asks again.
+    pub signed_out: AtomicBool,
+    /// Bumped every time the calculator sends a different goal list.
+    pub overlay_version: AtomicU64,
 
     inner: Mutex<Inner>,
 }
@@ -67,18 +75,19 @@ pub struct OverlayTile {
     pub name: String,
     pub label: String,
     pub left: i64,
+    /// Goal total and what the stash covers. 0 / 0 when an older calculator sent only `left`.
+    pub need: i64,
+    pub have: i64,
     pub png: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OverlayView {
     pub tiles: Vec<OverlayTile>,
-}
-
-impl Default for OverlayView {
-    fn default() -> Self {
-        Self { tiles: Vec::new() }
-    }
+    /// False until the calculator has sent a goal list at least once.
+    pub received: bool,
+    /// The calculator sent only what is left (no `need` / `have`).
+    pub legacy: bool,
 }
 
 struct Inner {
@@ -94,6 +103,8 @@ struct Inner {
     mapped_keys: u64,
     raw_stacks: u64,
     ws_clients: u64,
+    changes: Option<u64>,
+    last_push: Option<DateTime<Local>>,
     logs: VecDeque<String>,
     overlay: OverlayView,
 }
@@ -107,6 +118,10 @@ impl SharedState {
             prepare_requested: AtomicBool::new(false),
             prepared: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
+            next_poll_ms: AtomicU64::new(0),
+            done_until_ms: AtomicU64::new(0),
+            signed_out: AtomicBool::new(false),
+            overlay_version: AtomicU64::new(0),
             inner: Mutex::new(Inner {
                 steam: ConnState::Idle,
                 steam_detail: "Not started".into(),
@@ -120,6 +135,8 @@ impl SharedState {
                 mapped_keys: 0,
                 raw_stacks: 0,
                 ws_clients: 0,
+                changes: None,
+                last_push: None,
                 logs: VecDeque::new(),
                 overlay: OverlayView::default(),
             }),
@@ -128,7 +145,22 @@ impl SharedState {
 
     pub fn set_overlay(&self, view: OverlayView) {
         if let Ok(mut guard) = self.inner.lock() {
-            guard.overlay = view;
+            if guard.overlay != view {
+                guard.overlay = view;
+                self.overlay_version.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    pub fn set_changes(&self, changes: Option<u64>) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.changes = changes;
+        }
+    }
+
+    pub fn mark_pushed(&self) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.last_push = Some(Local::now());
         }
     }
 
@@ -210,14 +242,9 @@ impl SharedState {
             poll_interval_secs: poll,
             ws_clients: g.ws_clients,
             prepared,
+            changes: g.changes,
+            last_push: g.last_push,
         }
-    }
-
-    pub fn logs(&self) -> Vec<String> {
-        self.inner
-            .lock()
-            .map(|g| g.logs.iter().cloned().collect())
-            .unwrap_or_default()
     }
 }
 
@@ -231,8 +258,9 @@ pub fn parse_overlay(text: &str, allow_local_icons: bool) -> Option<OverlayView>
     }
     let page = value.get("page").and_then(|item| item.as_str()).unwrap_or("");
     let mut tiles = Vec::new();
+    let mut legacy = false;
     if let Some(items) = value.get("items").and_then(|item| item.as_array()) {
-        for item in items.iter().take(40) {
+        for item in items.iter().take(80) {
             let name = clean_label(item.get("name").and_then(|part| part.as_str()).unwrap_or(""));
             if name.is_empty() {
                 continue;
@@ -242,9 +270,20 @@ pub fn parse_overlay(text: &str, allow_local_icons: bool) -> Option<OverlayView>
                 .and_then(|part| part.as_i64())
                 .unwrap_or(0)
                 .clamp(0, 1_000_000);
-            if left <= 0 {
+            let need = item.get("need").and_then(|part| part.as_i64());
+            // Collected goals come only with `need`; an old calculator sends left > 0 only.
+            if left <= 0 && need.unwrap_or(0) <= 0 {
                 continue;
             }
+            if need.is_none() {
+                legacy = true;
+            }
+            let need = need.unwrap_or(0).clamp(0, 1_000_000);
+            let have = item
+                .get("have")
+                .and_then(|part| part.as_i64())
+                .unwrap_or(0)
+                .clamp(0, need);
             let mut label = clean_label(item.get("label").and_then(|part| part.as_str()).unwrap_or(""));
             if label.is_empty() {
                 label = name.clone();
@@ -262,11 +301,17 @@ pub fn parse_overlay(text: &str, allow_local_icons: bool) -> Option<OverlayView>
                 name,
                 label,
                 left,
+                need,
+                have,
                 png,
             });
         }
     }
-    Some(OverlayView { tiles })
+    Some(OverlayView {
+        tiles,
+        received: true,
+        legacy,
+    })
 }
 
 /// Read `img/<file>` next to the local calculator page. The name is one png file, nothing else.
@@ -472,6 +517,19 @@ mod tests {
         let closed = super::parse_overlay(&raw, false).expect("overlay");
         assert!(closed.tiles[0].png.is_empty());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn goal_list_keeps_collected_rows_with_totals() {
+        let view = super::parse_overlay(
+            r#"{"type":"overlay","items":[{"name":"Fabric","left":0,"need":5,"have":7},{"name":"Wires","left":2,"need":3,"have":1}]}"#,
+            false,
+        )
+        .expect("overlay");
+        assert!(!view.legacy);
+        assert_eq!(view.tiles.len(), 2);
+        assert_eq!((view.tiles[0].need, view.tiles[0].have), (5, 5));
+        assert_eq!(view.tiles[1].left, 2);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 ; No administrator rights.
 
 #define MyAppName "StashSync"
-#define MyAppVersion "0.2.5"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "Arccalc"
 #define MyAppURL "https://github.com/Arccalc/StashSync"
 #define MyAppExeName "StashSync.exe"
@@ -77,6 +77,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\target\release\StashSync.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release\steam_api64.dll"; DestDir: "{app}"; Flags: ignoreversion
+; Window fonts (SIL Open Font License).
+Source: "..\assets\fonts\OFL-Unbounded.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "..\assets\fonts\OFL-GolosText.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\StashSync"; Filename: "{app}\{#MyAppExeName}"
@@ -92,3 +95,53 @@ Filename: "{sys}\reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// The window is a WebView2 page. Windows 11 has the runtime; older systems may not.
+const
+  WebView2Id = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  WebView2Url = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
+
+var
+  DownloadPage: TDownloadWizardPage;
+
+function HasVersion(Root: Integer; Key: String): Boolean;
+var
+  Version: String;
+begin
+  Result := RegQueryStringValue(Root, Key, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0');
+end;
+
+function WebView2Installed: Boolean;
+begin
+  Result := HasVersion(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WebView2Id)
+    or HasVersion(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WebView2Id)
+    or HasVersion(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\' + WebView2Id);
+end;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  if (CurPageID <> wpReady) or WebView2Installed then
+    Exit;
+  DownloadPage.Clear;
+  DownloadPage.Add(WebView2Url, 'MicrosoftEdgeWebview2Setup.exe', '');
+  DownloadPage.Show;
+  try
+    try
+      DownloadPage.Download;
+      Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    except
+      SuppressibleMsgBox('StashSync needs Microsoft Edge WebView2 Runtime. Install it from ' + WebView2Url, mbError, MB_OK, IDOK);
+    end;
+  finally
+    DownloadPage.Hide;
+  end;
+end;

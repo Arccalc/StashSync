@@ -25,7 +25,7 @@ pub struct HelperConfig {
     pub run_at_startup: bool,
     /// en, ru, de, or fr. Empty or unknown means English.
     pub language: String,
-    /// Goal tiles in the corner, 0–100.
+    /// Goal tiles in the corner, 20–100.
     pub overlay_opacity: u8,
     /// When true, the corner list is text. When false, it is icon squares.
     pub overlay_list: bool,
@@ -38,6 +38,16 @@ pub struct HelperConfig {
     pub overlay_y: i32,
     /// Virtual-key code that toggles the overlay. F8 is 0x77.
     pub overlay_vk: u32,
+    /// tl, tr, bl or br keeps the overlay in that screen corner. Empty after a drag.
+    /// A config from 0.2.x has no corner: its saved x / y stay in charge.
+    #[serde(default)]
+    pub overlay_corner: String,
+    /// Collected goals leave the overlay.
+    pub overlay_hide_done: bool,
+    /// Overlay on or off (button, tray switch or the hotkey).
+    pub overlay_shown: bool,
+    /// Set by «Sign out». The app waits for «Sign in» before it asks Steam again.
+    pub signed_out: bool,
 }
 
 impl Default for HelperConfig {
@@ -48,13 +58,17 @@ impl Default for HelperConfig {
             auto_sync: true,
             run_at_startup: false,
             language: String::new(),
-            overlay_opacity: 100,
+            overlay_opacity: 90,
             overlay_list: false,
             overlay_vertical: false,
             overlay_scale: 100,
             overlay_x: 16,
             overlay_y: 16,
             overlay_vk: crate::hotkey::VK_F8,
+            overlay_corner: "tl".into(),
+            overlay_hide_done: true,
+            overlay_shown: false,
+            signed_out: false,
         }
     }
 }
@@ -62,13 +76,16 @@ impl Default for HelperConfig {
 impl HelperConfig {
     pub fn clamp(mut self) -> Self {
         self.poll_interval_secs = self.poll_interval_secs.clamp(MIN_POLL_SECS, MAX_POLL_SECS);
-        self.overlay_opacity = self.overlay_opacity.clamp(0, 100);
+        self.overlay_opacity = self.overlay_opacity.clamp(20, 100);
         self.overlay_scale = self.overlay_scale.clamp(50, 160);
         if !(0x08..=0xFE).contains(&self.overlay_vk) {
             self.overlay_vk = crate::hotkey::VK_F8;
         }
         self.overlay_x = self.overlay_x.clamp(-4000, 8000);
         self.overlay_y = self.overlay_y.clamp(-4000, 8000);
+        if !matches!(self.overlay_corner.as_str(), "" | "tl" | "tr" | "bl" | "br") {
+            self.overlay_corner = "tl".into();
+        }
         self
     }
 
@@ -98,6 +115,9 @@ impl HelperConfig {
             Ok(raw) => serde_json::from_str::<HelperConfig>(&raw).unwrap_or_default(),
             Err(_) => HelperConfig::default(),
         };
+        if cfg.language.is_empty() {
+            cfg.language = crate::win::system_language().to_string();
+        }
         // Old builds defaulted to a few seconds — migrate to 3 minutes.
         if cfg.poll_interval_secs < 60 {
             cfg.poll_interval_secs = DEFAULT_POLL_SECS;

@@ -12,6 +12,13 @@ fn main() {
 
     bake_rgba(&source, &out_dir, 256);
     bake_rgba(&source, &out_dir, 32);
+    // Tray mark: the ARC stripes alone, as on the design board. The app adds the status dot.
+    let tray = image::open("assets/tray.png")
+        .expect("assets/tray.png missing")
+        .into_rgba8();
+    let tray_path = out_dir.join("tray_256.rgba");
+    fs::write(&tray_path, tray.into_raw())
+        .unwrap_or_else(|e| panic!("write {}: {e}", tray_path.display()));
 
     #[cfg(windows)]
     {
@@ -25,7 +32,7 @@ fn main() {
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
-      version="0.2.5.0"
+      version="0.3.0.0"
       processorArchitecture="*"
       name="StashSync"
       type="win32"
@@ -56,6 +63,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=assets/icon.png");
     println!("cargo:rerun-if-changed=assets/icon.ico");
+    println!("cargo:rerun-if-changed=assets/tray.png");
 }
 
 fn bake_rgba(source: &image::RgbaImage, out_dir: &Path, size: u32) {

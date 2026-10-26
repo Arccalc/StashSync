@@ -1,6 +1,6 @@
 [package]
 name = "arccalc-helper"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2021"
 description = "StashSync: local inventory sync for ARC Calc"
 publish = false
@@ -27,7 +27,8 @@ base64 = "0.22.1"
 chrono = "0.4.45"
 hex = "0.4.3"
 futures-util = "0.3.32"
-eframe = "0.31"
+tao = "0.37"
+wry = "0.57"
 directories = "6"
 image = { version = "0.25", default-features = false, features = ["png"] }
 

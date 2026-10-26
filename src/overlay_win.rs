@@ -1,5 +1,5 @@
 //! Goal icons as a layered window. Empty pixels stay empty, the way desktop icons do.
-//! The egui window cannot do that on Windows: its empty area becomes a glass edge.
+//! Looks like the preview in the window: dark plates, white Golos numbers with a shadow.
 
 use std::collections::HashMap;
 use std::ffi::{c_void, OsStr};
@@ -22,6 +22,10 @@ const IDC_SIZEALL: isize = 32646;
 const ROW: f32 = 28.0;
 const LIST_W: f32 = 280.0;
 const LIST_ICON: f32 = 22.0;
+const LIST_PAD: f32 = 6.0;
+const FONT: &str = "Golos Text";
+const TEXT: (u8, u8, u8) = (0xF2, 0xEE, 0xE6);
+const PLATE: (u8, u8, u8) = (21, 18, 43);
 
 const WS_POPUP: u32 = 0x8000_0000;
 const WS_EX_TOPMOST: u32 = 0x0000_0008;
@@ -35,7 +39,7 @@ const SWP_SHOWWINDOW: u32 = 0x0040;
 const ULW_ALPHA: u32 = 0x0000_0002;
 const AC_SRC_ALPHA: u8 = 1;
 const FW_NORMAL: i32 = 400;
-const FW_MEDIUM: i32 = 500;
+const FW_BOLD: i32 = 700;
 const ANTIALIASED: u32 = 4;
 const TRANSPARENT_BK: i32 = 1;
 const DT_VCENTER: u32 = 0x0004;
@@ -61,6 +65,8 @@ pub struct OverlayFrame {
     pub scale_pct: u8,
     pub x: i32,
     pub y: i32,
+    /// tl, tr, bl, br: snap to that screen corner. Empty: use x / y.
+    pub corner: String,
     pub movable: bool,
 }
 
@@ -75,24 +81,6 @@ struct IconPx {
 fn icon_cache() -> &'static Mutex<HashMap<String, IconPx>> {
     static CACHE: std::sync::OnceLock<Mutex<HashMap<String, IconPx>>> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub fn place_at(x: i32, y: i32) {
-    DRAGGING.store(false, Ordering::Relaxed);
-    RELEASED.store(false, Ordering::Relaxed);
-    PLACE_X.store(x, Ordering::Relaxed);
-    PLACE_Y.store(y, Ordering::Relaxed);
-}
-
-pub fn take_dragged() -> Option<(i32, i32)> {
-    if RELEASED.swap(false, Ordering::Relaxed) {
-        Some((
-            PLACE_X.load(Ordering::Relaxed),
-            PLACE_Y.load(Ordering::Relaxed),
-        ))
-    } else {
-        None
-    }
 }
 
 pub fn sync(open: bool, frame: &OverlayFrame, tiles: &[OverlayTile]) {
@@ -120,6 +108,10 @@ pub fn sync(open: bool, frame: &OverlayFrame, tiles: &[OverlayTile]) {
         hide();
         return;
     }
+    if let Some((x, y)) = corner_spot(&frame.corner, width, height) {
+        PLACE_X.store(x, Ordering::Relaxed);
+        PLACE_Y.store(y, Ordering::Relaxed);
+    }
     let Some(hwnd) = window() else {
         return;
     };
@@ -134,6 +126,17 @@ pub fn sync(open: bool, frame: &OverlayFrame, tiles: &[OverlayTile]) {
         width,
         height,
     );
+}
+
+/// Same margin as the preview: 6 px of a 360 px wide screen.
+fn corner_spot(corner: &str, width: i32, height: i32) -> Option<(i32, i32)> {
+    let mut chars = corner.chars();
+    let (v, h) = (chars.next()?, chars.next()?);
+    let (sw, sh) = crate::win::screen_size();
+    let margin = (sw as f32 * 6.0 / 360.0).round() as i32;
+    let x = if h == 'l' { margin } else { sw - width - margin };
+    let y = if v == 't' { margin } else { sh - height - margin };
+    Some((x.max(0), y.max(0)))
 }
 
 fn grid_counts(len: usize, vertical: bool) -> (i32, i32) {
@@ -160,7 +163,7 @@ fn hide() {
     }
 }
 
-fn dpi_scale() -> f32 {
+pub fn dpi_scale() -> f32 {
     let dpi = unsafe { GetDpiForSystem() };
     if dpi < 96 { 1.0 } else { dpi as f32 / 96.0 }
 }
@@ -192,17 +195,10 @@ fn ensure_fonts() {
         };
         RegisterClassExW(&info);
         let mut count = 0u32;
-        let inter = include_bytes!("../assets/fonts/Inter-Regular.ttf");
-        let mono = include_bytes!("../assets/fonts/JetBrainsMono-Medium.ttf");
+        let golos = include_bytes!("../assets/fonts/GolosText.ttf");
         AddFontMemResourceEx(
-            inter.as_ptr() as *mut c_void,
-            inter.len() as u32,
-            std::ptr::null_mut(),
-            &mut count,
-        );
-        AddFontMemResourceEx(
-            mono.as_ptr() as *mut c_void,
-            mono.len() as u32,
+            golos.as_ptr() as *mut c_void,
+            golos.len() as u32,
             std::ptr::null_mut(),
             &mut count,
         );
@@ -276,6 +272,8 @@ fn paint(
         std::ptr::write_bytes(bits, 0, (width as usize) * (height as usize) * 4);
         let stride = width * 4;
         if list {
+            let radius = 6.0 * scale;
+            fill_plate(bits, stride, width, height, 0, 0, width, height, radius, 0.55, false, opacity);
             paint_list(bits, stride, width, tiles, scale, opacity);
             paint_list_text(bits, stride, width, height, screen, tiles, scale, opacity);
         } else {
@@ -347,12 +345,107 @@ fn paint_tiles(
     let tile = px(TILE, scale);
     let gap = px(GAP, scale);
     let step = tile + gap;
+    let icon = (tile as f32 * 0.78).round() as i32;
+    let inset = (tile - icon) / 2;
+    let rows = grid_counts(tiles.len(), vertical).1;
+    let height = rows * tile + (rows - 1).max(0) * gap;
     for (index, item) in tiles.iter().enumerate() {
         let (col, row) = slot(index, vertical);
         let x = col * step;
         let y = row * step;
-        blit_icon(bits, stride, width, item, x, y, tile, opacity);
+        fill_plate(bits, stride, width, height, x, y, tile, tile, 8.0 * scale, 0.8, true, opacity);
+        blit_icon(bits, stride, width, item, x + inset, y + inset, icon, opacity);
     }
+}
+
+/// Rounded plate in the preview colours, with a faint 1 px white edge on tiles.
+#[allow(clippy::too_many_arguments)]
+fn fill_plate(
+    bits: *mut u8,
+    stride: i32,
+    width: i32,
+    height: i32,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    radius: f32,
+    alpha: f32,
+    edge: bool,
+    opacity: u8,
+) {
+    let fade = f32::from(opacity.clamp(0, 100)) / 100.0;
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    for row in 0..h {
+        for col in 0..w {
+            let (dx, dy) = (x + col, y + row);
+            if dx < 0 || dy < 0 || dx >= width || dy >= height {
+                continue;
+            }
+            // Signed distance to the rounded rectangle edge (negative inside).
+            let qx = (col as f32 + 0.5 - cx).abs() - (cx - radius);
+            let qy = (row as f32 + 0.5 - cy).abs() - (cy - radius);
+            let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+            let dist = outside + qx.max(qy).min(0.0) - radius;
+            let cover = (0.5 - dist).clamp(0.0, 1.0);
+            if cover <= 0.0 {
+                continue;
+            }
+            let ring = if edge { (1.0 - (dist + 1.0).abs()).clamp(0.0, 1.0) } else { 0.0 };
+            // Plate first, then the white edge over it.
+            let mut layers = vec![(PLATE, alpha * cover)];
+            if ring > 0.0 {
+                layers.push(((255, 255, 255), 0.12 * ring));
+            }
+            for (color, a) in layers {
+                let sa = (a * fade * 255.0).round() as u32;
+                if sa == 0 {
+                    continue;
+                }
+                unsafe {
+                    let pixel = bits.add((dy * stride + dx * 4) as usize);
+                    let inv = 255 - sa;
+                    *pixel = (u32::from(color.2) * sa / 255 + u32::from(*pixel) * inv / 255) as u8;
+                    *pixel.add(1) = (u32::from(color.1) * sa / 255 + u32::from(*pixel.add(1)) * inv / 255) as u8;
+                    *pixel.add(2) = (u32::from(color.0) * sa / 255 + u32::from(*pixel.add(2)) * inv / 255) as u8;
+                    *pixel.add(3) = (sa + u32::from(*pixel.add(3)) * inv / 255) as u8;
+                }
+            }
+        }
+    }
+}
+
+fn count_text(item: &OverlayTile) -> String {
+    if item.left > 0 {
+        item.left.to_string()
+    } else {
+        "\u{2713}".to_string()
+    }
+}
+
+/// White text with the preview's 1 px drop shadow.
+#[allow(clippy::too_many_arguments)]
+fn shadow_text(
+    bits: *mut u8,
+    stride: i32,
+    width: i32,
+    height: i32,
+    screen: *mut c_void,
+    text: &str,
+    weight: i32,
+    size: i32,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    opacity: u8,
+    flags: u32,
+) {
+    let shadow = (u16::from(opacity) * 7 / 10) as u8;
+    stamp_text(
+        bits, stride, width, height, screen, text, FONT, weight, size, x, y + 1, w, h, (0, 0, 0), shadow, flags,
+    );
+    stamp_text(bits, stride, width, height, screen, text, FONT, weight, size, x, y, w, h, TEXT, opacity, flags);
 }
 
 fn paint_tile_text(
@@ -370,16 +463,18 @@ fn paint_tile_text(
     let gap = px(GAP, scale);
     let step = tile + gap;
     let size = (13.0 * scale).round().max(8.0) as i32;
-    let margin = px(3.0, scale);
+    // Preview: right 8 %, bottom 4 % of the tile.
+    let right = (tile as f32 * 0.08).round() as i32;
+    let bottom = (tile as f32 * 0.04).round() as i32;
     for (index, item) in tiles.iter().enumerate() {
         let (col, row) = slot(index, vertical);
-        let text = item.left.to_string();
-        let (tw, th) = text_size(screen, "JetBrains Mono", FW_MEDIUM, size, &text);
-        let x = col * step + tile - tw - margin;
-        let y = row * step + tile - th - px(2.0, scale);
-        stamp_text(
-            bits, stride, width, height, screen, &text, "JetBrains Mono", FW_MEDIUM, size, x, y, tw,
-            th, (0xe8, 0xa3, 0x3d), opacity, DT_SINGLELINE | DT_NOCLIP | DT_NOPREFIX,
+        let text = count_text(item);
+        let (tw, th) = text_size(screen, FONT, FW_BOLD, size, &text);
+        let x = col * step + tile - tw - right;
+        let y = row * step + tile - th - bottom;
+        shadow_text(
+            bits, stride, width, height, screen, &text, FW_BOLD, size, x, y, tw, th + 1, opacity,
+            DT_SINGLELINE | DT_NOCLIP | DT_NOPREFIX,
         );
     }
 }
@@ -387,10 +482,11 @@ fn paint_tile_text(
 fn paint_list(bits: *mut u8, stride: i32, width: i32, tiles: &[OverlayTile], scale: f32, opacity: u8) {
     let row_h = px(ROW, scale);
     let icon = px(LIST_ICON, scale);
+    let pad = px(LIST_PAD, scale);
     for (index, item) in tiles.iter().enumerate() {
         let y = index as i32 * row_h;
         let icon_y = y + (row_h - icon) / 2;
-        blit_icon(bits, stride, width, item, 0, icon_y, icon, opacity);
+        blit_icon(bits, stride, width, item, pad, icon_y, icon, opacity);
     }
 }
 
@@ -406,35 +502,34 @@ fn paint_list_text(
 ) {
     let row_h = px(ROW, scale);
     let icon = px(LIST_ICON, scale);
-    let size = (14.0 * scale).round().max(8.0) as i32;
-    let gap = px(8.0, scale);
+    let pad = px(LIST_PAD, scale);
+    let size = (13.0 * scale).round().max(8.0) as i32;
+    let gap = px(6.0, scale);
     for (index, item) in tiles.iter().enumerate() {
         let y = index as i32 * row_h;
-        let count = item.left.to_string();
-        let (cw, ch) = text_size(screen, "JetBrains Mono", FW_MEDIUM, size, &count);
-        let count_x = width - cw - px(2.0, scale);
+        let count = count_text(item);
+        let (cw, ch) = text_size(screen, FONT, FW_BOLD, size, &count);
+        let count_x = width - cw - pad;
         let count_y = y + (row_h - ch) / 2;
-        stamp_text(
-            bits, stride, width, height, screen, &count, "JetBrains Mono", FW_MEDIUM, size, count_x,
-            count_y, cw, ch, (0xe8, 0xa3, 0x3d), opacity, DT_SINGLELINE | DT_NOCLIP | DT_NOPREFIX,
+        shadow_text(
+            bits, stride, width, height, screen, &count, FW_BOLD, size, count_x, count_y, cw, ch + 1,
+            opacity, DT_SINGLELINE | DT_NOCLIP | DT_NOPREFIX,
         );
-        let text_x = icon + gap;
+        let text_x = pad + icon + gap;
         let text_w = (count_x - gap - text_x).max(px(24.0, scale));
-        stamp_text(
+        shadow_text(
             bits,
             stride,
             width,
             height,
             screen,
             &item.label,
-            "Inter",
             FW_NORMAL,
             size,
             text_x,
             y,
             text_w,
             row_h,
-            (0xed, 0xed, 0xf0),
             opacity,
             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
         );

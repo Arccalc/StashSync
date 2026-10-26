@@ -1,4 +1,4 @@
-// Hide console on Windows release builds — logs go to the GUI.
+// Hide console on Windows release builds — logs go to the window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::fs::{self};
@@ -15,6 +15,7 @@ use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::http;
 
+mod app;
 mod config;
 mod embark_auth;
 mod hotkey;
@@ -25,12 +26,10 @@ mod loadout_names;
 mod mappings;
 mod overlay_win;
 mod state;
-mod theme;
-mod ui;
+mod win;
 
 use config::HelperConfig;
 use state::{ConnState, SharedState};
-use ui::HelperApp;
 
 pub const ARC_RAIDERS_STEAM_APP_ID: u32 = 1808500;
 
@@ -391,11 +390,15 @@ async fn handle_inventory_update(
     let mut update = false;
     {
         let mut last_inv_lock = last_inventory.lock().unwrap();
+        state.set_changes(last_inv_lock.as_ref().map(|old| changed_items(old, &translated)));
         if last_inv_lock.as_ref() != Some(&translated) {
             *last_inv_lock = Some(translated.clone());
             update = true;
         }
     }
+    state
+        .done_until_ms
+        .store(state::now_ms() + 2600, Ordering::Relaxed);
 
     if update {
         let loadout_note = loadout_slots
@@ -409,6 +412,22 @@ async fn handle_inventory_update(
     } else {
         state.set_inventory(ConnState::Ok, format!("Synced · {mapped_keys} items"));
     }
+}
+
+/// Calculator items whose count differs between two syncs (worn gear is not counted).
+fn changed_items(old: &serde_json::Value, new: &serde_json::Value) -> u64 {
+    let empty = serde_json::Map::new();
+    let old = old.as_object().unwrap_or(&empty);
+    let new = new.as_object().unwrap_or(&empty);
+    let mut keys: Vec<&String> = old.keys().chain(new.keys()).collect();
+    keys.sort();
+    keys.dedup();
+    keys.into_iter()
+        .filter(|key| !key.starts_with('_'))
+        .filter(|key| {
+            old.get(*key).map(json_i64).unwrap_or(0) != new.get(*key).map(json_i64).unwrap_or(0)
+        })
+        .count() as u64
 }
 
 // ---------------------------------------------------------------------------
@@ -570,11 +589,15 @@ async fn run_services(state: Arc<SharedState>) -> Result<()> {
                                     last_inventory.lock().unwrap().clone()
                                 };
                                 if let Some(inv_val) = initial_inv {
-                                    let _ = ws_sender
+                                    if ws_sender
                                         .send(tokio_tungstenite::tungstenite::Message::Text(
                                             inv_val.to_string(),
                                         ))
-                                        .await;
+                                        .await
+                                        .is_ok()
+                                    {
+                                        state_ws.mark_pushed();
+                                    }
                                 }
 
                                 loop {
@@ -588,6 +611,7 @@ async fn run_services(state: Arc<SharedState>) -> Result<()> {
                                                 {
                                                     break;
                                                 }
+                                                state_ws.mark_pushed();
                                             }
                                         }
                                         msg = ws_receiver.next() => {
@@ -647,6 +671,13 @@ async fn run_services(state: Arc<SharedState>) -> Result<()> {
                 let auto = state_poll.auto_sync.load(Ordering::Relaxed);
                 let interval_ms =
                     state_poll.poll_interval_secs.load(Ordering::Relaxed).max(30) * 1000;
+                // The window counts down to this moment.
+                let next = if auto {
+                    crate::state::now_ms() + interval_ms.saturating_sub(elapsed_ms)
+                } else {
+                    0
+                };
+                state_poll.next_poll_ms.store(next, Ordering::Relaxed);
 
                 if !crate::state::due(force, auto, elapsed_ms, interval_ms) {
                     if !auto {
@@ -655,6 +686,15 @@ async fn run_services(state: Arc<SharedState>) -> Result<()> {
                     continue;
                 }
                 elapsed_ms = 0;
+
+                // After «Sign out» only a click on «Sign in» may open a new Steam session.
+                if !force
+                    && state_poll.signed_out.load(Ordering::Relaxed)
+                    && !embark_auth::has_session()
+                {
+                    continue;
+                }
+                state_poll.signed_out.store(false, Ordering::Relaxed);
 
                 let token = if let Some(token) = embark_auth::cached_token() {
                     token
@@ -715,6 +755,8 @@ async fn run_services(state: Arc<SharedState>) -> Result<()> {
                         };
                         state_poll.set_inventory(ConnState::Error, detail.clone());
                         state_poll.log(format!("Inventory error: {detail}"));
+                        // Retry in 30 s instead of waiting for the whole interval.
+                        elapsed_ms = interval_ms.saturating_sub(30_000);
                     }
                 }
             }
@@ -1375,7 +1417,7 @@ fn sync_once_report() -> String {
 // Entry
 // ---------------------------------------------------------------------------
 
-fn main() -> eframe::Result<()> {
+fn main() {
     let mut args = std::env::args();
     let _exe = args.next();
     if args.next().as_deref() == Some("--embark-auth") {
@@ -1386,12 +1428,12 @@ fn main() -> eframe::Result<()> {
             });
             let _ = std::fs::write(&path, payload.to_string());
         }
-        return Ok(());
+        return;
     }
     if std::env::args().any(|arg| arg == "--sync-once") {
         let report = sync_once_report();
         let _ = fs::write("sync-once-result.txt", &report);
-        return Ok(());
+        return;
     }
     if std::env::args().any(|arg| arg == "--probe-stash") {
         let report = match embark_auth::current_token() {
@@ -1399,12 +1441,13 @@ fn main() -> eframe::Result<()> {
             Err(err) => format!("auth err {}", embark_auth::redact(&format!("{err:#}"))),
         };
         let _ = fs::write("stash-probe.txt", &report);
-        return Ok(());
+        return;
     }
 
     let config = HelperConfig::load();
     config::apply_run_at_startup(config.run_at_startup);
     let state = SharedState::new(config.poll_interval_secs, config.auto_sync);
+    state.signed_out.store(config.signed_out, Ordering::Relaxed);
     state.log("StashSync started");
     state.log(format!(
         "Poll interval: {}s (config: {:?})",
@@ -1417,38 +1460,7 @@ fn main() -> eframe::Result<()> {
     }
 
     start_background(state.clone());
-
-    let start_h = crate::theme::window_h(false);
-    let native_options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("StashSync")
-            .with_inner_size([crate::theme::WIN_W, start_h])
-            .with_min_inner_size([crate::theme::WIN_W, start_h])
-            .with_decorations(false)
-            .with_resizable(false)
-            // The corner overlay is a second window on this same GL setup.
-            // Windows only lets that window be see-through when the setup has an alpha channel.
-            // The main window still paints a solid panel, so it stays opaque.
-            .with_transparent(true)
-            .with_icon(app_icon()),
-        ..Default::default()
-    };
-
-    let cfg = config.clone();
-    eframe::run_native(
-        "StashSync",
-        native_options,
-        Box::new(move |cc| Ok(Box::new(HelperApp::new(cc, state, cfg)))),
-    )
-}
-
-/// Window / taskbar mark baked by `build.rs` from `assets/icon.png`.
-fn app_icon() -> eframe::egui::IconData {
-    eframe::egui::IconData {
-        rgba: include_bytes!(concat!(env!("OUT_DIR"), "/icon_256.rgba")).to_vec(),
-        width: 256,
-        height: 256,
-    }
+    app::run(state, config);
 }
 
 #[cfg(test)]
