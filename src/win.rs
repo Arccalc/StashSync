@@ -157,11 +157,15 @@ pub fn work_area() -> (i32, i32, i32, i32) {
 pub const WEBVIEW2_URL: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
 
 /// Only the pages the app links to.
-pub fn open_url(url: &str) {
-    let allowed = url == "https://arccalc.github.io"
+fn url_allowed(url: &str) -> bool {
+    url == "https://arccalc.github.io"
         || url == "https://github.com/Arccalc/StashSync"
-        || url == WEBVIEW2_URL;
-    if !allowed {
+        || url == "https://ko-fi.com/U7U21PU1TF"
+        || url == WEBVIEW2_URL
+}
+
+pub fn open_url(url: &str) {
+    if !url_allowed(url) {
         return;
     }
     let verb = wide("open");
@@ -601,4 +605,17 @@ extern "system" {
 #[link(name = "dwmapi")]
 extern "system" {
     fn DwmSetWindowAttribute(hwnd: *mut c_void, attr: u32, value: *const c_void, size: u32) -> i32;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_link_of_the_window_is_allowed() {
+        let page = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/ui/app.js")).expect("ui/app.js");
+        for part in page.split("data-url=\"").skip(1) {
+            let url = part.split('"').next().unwrap_or("");
+            assert!(super::url_allowed(url), "not allowed: {url}");
+        }
+        assert!(!super::url_allowed("https://example.com"));
+    }
 }

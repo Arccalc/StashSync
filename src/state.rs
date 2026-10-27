@@ -372,6 +372,16 @@ fn file_url_path(url: &str) -> Option<PathBuf> {
     if decoded.is_empty() || decoded.contains('\0') {
         return None;
     }
+    // Only a page on a local drive («C:/…»). A network path (\\server\share, //server) would make
+    // Windows connect to that server and send the user's credentials while we look for the icon.
+    let bytes = decoded.as_bytes();
+    let drive = bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\');
+    if !drive || decoded[2..].starts_with("//") || decoded[2..].starts_with("\\\\") {
+        return None;
+    }
     Some(PathBuf::from(decoded))
 }
 
@@ -517,6 +527,17 @@ mod tests {
         let closed = super::parse_overlay(&raw, false).expect("overlay");
         assert!(closed.tiles[0].png.is_empty());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_icon_page_must_be_on_a_local_drive() {
+        assert!(super::file_url_path("file:///C:/Users/me/arc/index.html").is_some());
+        assert!(super::file_url_path("file:///%5C%5Cevil%5Cshare%5Cx.html").is_none());
+        assert!(super::file_url_path("file:///\\\\evil\\share\\x.html").is_none());
+        assert!(super::file_url_path("file:////evil/share/x.html").is_none());
+        assert!(super::file_url_path("file://evil/share/x.html").is_none());
+        assert!(super::file_url_path("file:///C://evil/share/x.html").is_none());
+        assert!(super::file_url_path("file:///relative/x.html").is_none());
     }
 
     #[test]
