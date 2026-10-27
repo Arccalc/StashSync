@@ -1060,7 +1060,8 @@
     const rects = nodes.map((n) => {
       const b = n.getBoundingClientRect(); let top = b.top, bottom = b.bottom;
       const sc = n.closest('.cb-scroll'); if (sc) { const pb = sc.getBoundingClientRect(); top = Math.max(top, pb.top); bottom = Math.min(bottom, pb.bottom); }
-      return { l: Math.round(b.left - 6), t: Math.round(top - 6), r: Math.round(b.right + 6), b: Math.round(bottom + 6) };
+      // keep the ring inside the window, so its edge shows for tabs, title-bar buttons and «?» at the border
+      return { l: Math.round(Math.max(2, b.left - 6)), t: Math.round(Math.max(2, top - 6)), r: Math.round(Math.min(innerWidth - 2, b.right + 6)), b: Math.round(Math.min(innerHeight - 2, bottom + 6)) };
     }).filter((x) => x.b - x.t > 8);
     const card = document.getElementById('cb-tc'), ch = card ? card.offsetHeight : 0;
     const key = rects.map((x) => [x.l, x.t, x.r, x.b].join(',')).join('|') + '#' + ch;
@@ -1078,21 +1079,25 @@
       else if (R.l - gap - cw >= m) { cl = R.l - gap - cw; ct = cy(R.t); }
       else if (R.b + gap + ch <= H - m) { ct = R.b + gap; cl = cx(R.l); }
       else if (R.t - gap - ch >= m) { ct = R.t - gap - ch; cl = cx(R.l); }
-      else { ct = cy(H - ch - m); cl = cx(R.l); }
+      // no free side: put the card on the side with more room so it covers as little of the target as possible
+      else { ct = H - m - R.b >= R.t - m ? cy(H - ch - m) : cy(m); cl = cx(R.l); }
     }
     const hole = (x) => { const q = Math.min(10, (x.r - x.l) / 2, (x.b - x.t) / 2); return 'M' + (x.l + q) + ' ' + x.t + 'H' + (x.r - q) + 'A' + q + ' ' + q + ' 0 0 1 ' + x.r + ' ' + (x.t + q) + 'V' + (x.b - q) + 'A' + q + ' ' + q + ' 0 0 1 ' + (x.r - q) + ' ' + x.b + 'H' + (x.l + q) + 'A' + q + ' ' + q + ' 0 0 1 ' + x.l + ' ' + (x.b - q) + 'V' + (x.t + q) + 'A' + q + ' ' + q + ' 0 0 1 ' + (x.l + q) + ' ' + x.t + 'Z'; };
     const last = tr.i === steps.length - 1, wait = !!(st.until && !st.until());
+    // Low windows: a compact card (smaller text, «Skip» in the button row) so it covers less of the target.
+    const sm = H < 480;
+    const skip = !last ? '<button class="cb-tskip" data-act="tourEnd">' + esc(t('tourSkip')) + '</button>' : '';
+    const nav = '<button class="cb-ghost"' + (sm ? ' style="height: 32px"' : '') + ' data-act="tourBack"' + (tr.i === 0 ? ' disabled' : '') + '>' + esc(t('back')) + '</button>' +
+      '<button class="cb-btn" style="height: ' + (sm ? 32 : 36) + 'px; font-size: 13px" data-act="tourNext">' + esc(last ? t('finish') : t('next')) + '</button>';
     return '<div class="cb-tdim" aria-hidden="true" style="clip-path: path(evenodd, \'M0 0H' + W + 'V' + H + 'H0Z' + rects.map(hole).join('') + '\')"></div>' +
       rects.map((x, i) => '<div class="cb-tring" data-key="ring' + i + '" style="left: ' + x.l + 'px; top: ' + x.t + 'px; width: ' + (x.r - x.l) + 'px; height: ' + (x.b - x.t) + 'px"></div>').join('') +
-      '<div id="cb-tc" class="cb-tc" role="dialog" aria-label="' + esc(t('tourAria')) + '" style="width: ' + cw + 'px; left: ' + Math.round(cl) + 'px; top: ' + Math.round(ct) + 'px">' +
+      '<div id="cb-tc" class="cb-tc' + (sm ? ' cb-tc-sm' : '') + '" role="dialog" aria-label="' + esc(t('tourAria')) + '" style="width: ' + cw + 'px; left: ' + Math.round(cl) + 'px; top: ' + Math.round(ct) + 'px">' +
       '<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px"><span class="cb-tstep">' + esc(t('stepOf', tr.i + 1, steps.length)) + '</span>' +
       '<button class="cb-wbtn" style="width: 28px; height: 28px" aria-label="' + esc(t('tourClose')) + '" data-act="tourEnd"><svg width="12" height="12" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg></button></div>' +
       '<p class="cb-ttext" aria-live="polite">' + esc(st.text || '') + '</p>' +
       (wait ? '<p class="cb-twait">' + esc(t('tourWait')) + '</p>' : '') +
       (st.until && !wait ? '<p class="cb-tok">' + esc(t('tourOk')) + '</p>' : '') +
-      '<div class="cb-tact"><button class="cb-ghost" data-act="tourBack"' + (tr.i === 0 ? ' disabled' : '') + '>' + esc(t('back')) + '</button>' +
-      '<button class="cb-btn" style="height: 36px; font-size: 13px" data-act="tourNext">' + esc(last ? t('finish') : t('next')) + '</button></div>' +
-      (!last ? '<button class="cb-tskip" data-act="tourEnd">' + esc(t('tourSkip')) + '</button>' : '') +
+      (sm ? '<div class="cb-tact">' + skip + nav + '</div>' : '<div class="cb-tact">' + nav + '</div>' + skip) +
       '</div>';
   }
 
