@@ -87,8 +87,8 @@ Source: "..\assets\fonts\OFL-Unbounded.txt"; DestDir: "{app}\licenses"; Flags: i
 Source: "..\assets\fonts\OFL-GolosText.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\StashSync"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\StashSync"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\StashSync"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "Arccalc.StashSync"
+Name: "{autodesktop}\StashSync"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "Arccalc.StashSync"; Tasks: desktopicon
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

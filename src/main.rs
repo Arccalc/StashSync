@@ -1450,6 +1450,7 @@ fn main() {
         return;
     }
 
+    win::set_app_id();
     let config = HelperConfig::load();
     config::apply_run_at_startup(config.run_at_startup);
     // Windows start: stay in the tray unless there is still a sign-in to do.

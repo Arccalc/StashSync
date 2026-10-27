@@ -81,6 +81,26 @@ fn fill(dest: &mut [u16], text: &str) {
     dest[chars.len()] = 0;
 }
 
+/// Windows knows the app by this id in notifications and on the taskbar (the installer's shortcuts carry it too).
+pub const APP_ID: &str = "Arccalc.StashSync";
+
+/// Notifications from the tray icon take their name and icon from the Start menu shortcut that
+/// carries APP_ID (the installer makes it). Without the id Windows shows the exe description and the
+/// icon it cached for the exe path, which is still the 0.2 icon where 0.2 was installed.
+/// Only the installed copy claims the id: a copy without that shortcut would show the bare id.
+/// Call before any window exists.
+pub fn set_app_id() {
+    let installed = std::env::current_exe().ok().zip(std::env::var_os("LOCALAPPDATA")).is_some_and(|(exe, base)| {
+        exe.parent().is_some_and(|dir| dir.eq(&std::path::PathBuf::from(base).join("StashSync")))
+    });
+    if installed {
+        let id = wide(APP_ID);
+        unsafe {
+            SetCurrentProcessExplicitAppUserModelID(id.as_ptr());
+        }
+    }
+}
+
 /// Steam writes the signed-in account here while it runs.
 pub fn steam_signed_in() -> bool {
     let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
@@ -554,6 +574,7 @@ extern "system" {
 #[link(name = "shell32")]
 extern "system" {
     fn Shell_NotifyIconW(message: u32, data: *mut NotifyIconData) -> i32;
+    fn SetCurrentProcessExplicitAppUserModelID(id: *const u16) -> i32;
     fn ShellExecuteW(
         hwnd: *mut c_void,
         verb: *const u16,
