@@ -50,7 +50,15 @@ pub struct HelperConfig {
     pub signed_out: bool,
     /// The window's × quits. Off: × hides the window to the tray and sync goes on.
     pub close_quits: bool,
+    /// Main window size in logical pixels, as the user left it.
+    pub window_w: u32,
+    pub window_h: u32,
 }
+
+/// Main window size: the default, and the range the user can drag it to.
+pub const WIN_DEFAULT: (u32, u32) = (400, 680);
+pub const WIN_MIN: (u32, u32) = (300, 360);
+pub const WIN_MAX: (u32, u32) = (1100, 800);
 
 impl Default for HelperConfig {
     fn default() -> Self {
@@ -72,6 +80,8 @@ impl Default for HelperConfig {
             overlay_shown: false,
             signed_out: false,
             close_quits: false,
+            window_w: WIN_DEFAULT.0,
+            window_h: WIN_DEFAULT.1,
         }
     }
 }
@@ -89,6 +99,8 @@ impl HelperConfig {
         if !matches!(self.overlay_corner.as_str(), "" | "tl" | "tr" | "bl" | "br") {
             self.overlay_corner = "tl".into();
         }
+        self.window_w = self.window_w.clamp(WIN_MIN.0, WIN_MAX.0);
+        self.window_h = self.window_h.clamp(WIN_MIN.1, WIN_MAX.1);
         self
     }
 

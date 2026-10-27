@@ -10,25 +10,23 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde_json::{json, Value};
-use tao::dpi::{LogicalSize, PhysicalPosition};
+use tao::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget};
 use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
-use tao::window::{Icon, Window, WindowBuilder};
+use tao::window::{Icon, ResizeDirection, Window, WindowBuilder};
 use wry::http::{Request, Response};
 use wry::{
     MemoryUsageLevel, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
     WebViewExtWindows,
 };
 
-use crate::config::{normalize_language, HelperConfig};
+use crate::config::{normalize_language, HelperConfig, WIN_DEFAULT, WIN_MAX, WIN_MIN};
 use crate::embark_auth;
 use crate::hotkey::Hotkey;
 use crate::state::{now_ms, ConnState, SharedState};
 use crate::win::{self, TrayClick};
 
-const WIN_W: f64 = 400.0;
-const WIN_H: f64 = 680.0;
 const FLY_W: f64 = 340.0;
 const ORIGIN: &str = "http://stashsync.localhost";
 const BG: (u8, u8, u8, u8) = (0x1E, 0x1A, 0x3A, 0xFF);
@@ -86,6 +84,8 @@ struct App {
     config_dirty: bool,
     /// The «still in the tray» notification is shown once per run.
     told_tray: bool,
+    /// Last resize of the main window; the size is saved once the drag settles.
+    resized_at: Option<Instant>,
 }
 
 pub fn run(state: Arc<SharedState>, config: HelperConfig, start_in_tray: bool) -> ! {
@@ -104,8 +104,9 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig, start_in_tray: bool) -
     .ok();
     let main_window = WindowBuilder::new()
         .with_title("StashSync")
-        .with_inner_size(LogicalSize::new(WIN_W, WIN_H))
-        .with_resizable(false)
+        .with_inner_size(LogicalSize::new(config.window_w as f64, config.window_h as f64))
+        // Borderless: the page has edge zones that start a resize drag (`resize` command).
+        .with_resizable(true)
         .with_maximizable(false)
         .with_decorations(false)
         .with_undecorated_shadow(true)
@@ -114,6 +115,7 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig, start_in_tray: bool) -
         .build(&event_loop)
         .expect("window");
     win::round_corners(main_window.hwnd());
+    apply_size_limits(&main_window);
 
     let main_view = match build_page(&mut context, &main_window, "/index.html", Target::Main, &proxy) {
         Ok(view) => view,
@@ -174,6 +176,7 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig, start_in_tray: bool) -
         tray_dot: "wait",
         config_dirty: false,
         told_tray: false,
+        resized_at: None,
     };
     if start_in_tray {
         let _ = app.main.view.set_visible(false);
@@ -211,17 +214,34 @@ pub fn run(state: Arc<SharedState>, config: HelperConfig, start_in_tray: bool) -
                     }
                 } else if window_id == app.main.window.id() {
                     // Alt+F4 works like the window's ×.
-                    if let WindowEvent::CloseRequested = event {
-                        if app.close_main() {
-                            app.quit();
-                            *control_flow = ControlFlow::Exit;
+                    match event {
+                        WindowEvent::CloseRequested => {
+                            if app.close_main() {
+                                app.quit();
+                                *control_flow = ControlFlow::Exit;
+                            }
                         }
+                        WindowEvent::Resized(size) => app.on_resized(size),
+                        WindowEvent::ScaleFactorChanged { .. } => apply_size_limits(&app.main.window),
+                        _ => {}
                     }
                 }
             }
             _ => {}
         }
     })
+}
+
+/// Size limits of the main window. tao applies them to the outer rectangle as if the borderless
+/// window had no frame, but it keeps an invisible resize/shadow frame, so the frame is added here
+/// (else the page ends up 14 × 8 px short at the limits). Again after a DPI change.
+fn apply_size_limits(window: &Window) {
+    let sf = window.scale_factor();
+    let (outer, inner) = (window.outer_size(), window.inner_size());
+    let (fw, fh) = (outer.width.saturating_sub(inner.width), outer.height.saturating_sub(inner.height));
+    let px = |v: u32, frame: u32| (v as f64 * sf).round() as u32 + frame;
+    window.set_min_inner_size(Some(PhysicalSize::new(px(WIN_MIN.0, fw), px(WIN_MIN.1, fh))));
+    window.set_max_inner_size(Some(PhysicalSize::new(px(WIN_MAX.0, fw), px(WIN_MAX.1, fh))));
 }
 
 fn build_page(
@@ -392,6 +412,10 @@ impl App {
         let applied = self.hotkey.applied();
         if applied != 0 && applied != self.config.overlay_vk {
             self.config.overlay_vk = applied;
+            self.config_dirty = true;
+        }
+        if self.resized_at.is_some_and(|at| at.elapsed() > Duration::from_millis(700)) {
+            self.resized_at = None;
             self.config_dirty = true;
         }
         if self.config_dirty {
@@ -602,6 +626,20 @@ impl App {
         if !self.told_tray {
             self.told_tray = true;
             win::tray_balloon("StashSync", in_tray_text(&self.config.language));
+        }
+    }
+
+    /// Remembers the size the user dragged the window to (minimizing reports 0×0, skip it).
+    fn on_resized(&mut self, size: tao::dpi::PhysicalSize<u32>) {
+        if size.width == 0 || size.height == 0 || self.main.window.is_minimized() {
+            return;
+        }
+        let logical = size.to_logical::<f64>(self.main.window.scale_factor());
+        let (w, h) = (logical.width.round() as u32, logical.height.round() as u32);
+        if (w, h) != (self.config.window_w, self.config.window_h) {
+            self.config.window_w = w.clamp(WIN_MIN.0, WIN_MAX.0);
+            self.config.window_h = h.clamp(WIN_MIN.1, WIN_MAX.1);
+            self.resized_at = Some(Instant::now());
         }
     }
 
@@ -865,6 +903,26 @@ impl App {
             "quit" => return true,
             "drag" => {
                 let _ = self.main.window.drag_window();
+            }
+            "resize" => {
+                let dir = match msg.get("dir").and_then(Value::as_str).unwrap_or("") {
+                    "n" => Some(ResizeDirection::North),
+                    "s" => Some(ResizeDirection::South),
+                    "e" => Some(ResizeDirection::East),
+                    "w" => Some(ResizeDirection::West),
+                    "ne" => Some(ResizeDirection::NorthEast),
+                    "nw" => Some(ResizeDirection::NorthWest),
+                    "se" => Some(ResizeDirection::SouthEast),
+                    "sw" => Some(ResizeDirection::SouthWest),
+                    _ => None,
+                };
+                if let Some(dir) = dir {
+                    let _ = self.main.window.drag_resize_window(dir);
+                }
+            }
+            "resetSize" => {
+                let (w, h) = WIN_DEFAULT;
+                self.main.window.set_inner_size(LogicalSize::new(w as f64, h as f64));
             }
             "open" => {
                 if let Some(url) = msg.get("url").and_then(Value::as_str) {
